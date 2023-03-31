@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,48 +16,56 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Example DAG demonstrating the usage of the SubDagOperator."""
-from __future__ import annotations
 
-# [START example_subdag_operator]
-import datetime
-
-from airflow import DAG
+import airflow
 from airflow.example_dags.subdags.subdag import subdag
-from airflow.operators.empty import EmptyOperator
-from airflow.operators.subdag import SubDagOperator
+from airflow.models import DAG
+from airflow.operators.dummy_operator import DummyOperator
+from airflow.operators.subdag_operator import SubDagOperator
 
-DAG_NAME = "example_subdag_operator"
+DAG_NAME = 'example_subdag_operator'
 
-with DAG(
+args = {
+    'owner': 'airflow',
+    'start_date': airflow.utils.dates.days_ago(2),
+}
+
+dag = DAG(
     dag_id=DAG_NAME,
-    default_args={"retries": 2},
-    start_date=datetime.datetime(2022, 1, 1),
-    schedule="@once",
-    tags=["example"],
-) as dag:
+    default_args=args,
+    schedule_interval="@once",
+)
 
-    start = EmptyOperator(
-        task_id="start",
-    )
+start = DummyOperator(
+    task_id='start',
+    default_args=args,
+    dag=dag,
+)
 
-    section_1 = SubDagOperator(
-        task_id="section-1",
-        subdag=subdag(DAG_NAME, "section-1", dag.default_args),
-    )
+section_1 = SubDagOperator(
+    task_id='section-1',
+    subdag=subdag(DAG_NAME, 'section-1', args),
+    default_args=args,
+    dag=dag,
+)
 
-    some_other_task = EmptyOperator(
-        task_id="some-other-task",
-    )
+some_other_task = DummyOperator(
+    task_id='some-other-task',
+    default_args=args,
+    dag=dag,
+)
 
-    section_2 = SubDagOperator(
-        task_id="section-2",
-        subdag=subdag(DAG_NAME, "section-2", dag.default_args),
-    )
+section_2 = SubDagOperator(
+    task_id='section-2',
+    subdag=subdag(DAG_NAME, 'section-2', args),
+    default_args=args,
+    dag=dag,
+)
 
-    end = EmptyOperator(
-        task_id="end",
-    )
+end = DummyOperator(
+    task_id='end',
+    default_args=args,
+    dag=dag,
+)
 
-    start >> section_1 >> some_other_task >> section_2 >> end
-# [END example_subdag_operator]
+start >> section_1 >> some_other_task >> section_2 >> end

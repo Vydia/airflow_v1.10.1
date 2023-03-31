@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,101 +16,89 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
+#
+import os
 
-import sys
-import warnings
-from collections import deque
+# inspect.signature is only available in Python 3. funcsigs.signature is
+# a backport.
+try:
+    import inspect
+    signature = inspect.signature
+except AttributeError:
+    import funcsigs
+    signature = funcsigs.signature
+
+from copy import copy
 from functools import wraps
-from typing import Callable, TypeVar, cast
 
-from airflow.exceptions import RemovedInAirflow3Warning
-
-T = TypeVar("T", bound=Callable)
+from airflow.exceptions import AirflowException
 
 
-def apply_defaults(func: T) -> T:
+def apply_defaults(func):
     """
-    This decorator is deprecated.
+    Function decorator that Looks for an argument named "default_args", and
+    fills the unspecified arguments from it.
 
-    In previous versions, all subclasses of BaseOperator must use apply_default decorator for the"
-    `default_args` feature to work properly.
-
-    In current version, it is optional. The decorator is applied automatically using the metaclass.
+    Since python2.* isn't clear about which arguments are missing when
+    calling a function, and that this can be quite confusing with multi-level
+    inheritance and argument defaults, this decorator also alerts with
+    specific information about the missing arguments.
     """
-    warnings.warn(
-        "This decorator is deprecated. \n"
-        "\n"
-        "In previous versions, all subclasses of BaseOperator must use apply_default decorator for the "
-        "`default_args` feature to work properly.\n"
-        "\n"
-        "In current version, it is optional. The decorator is applied automatically using the metaclass.\n",
-        RemovedInAirflow3Warning,
-        stacklevel=3,
-    )
 
-    # Make it still be a wrapper to keep the previous behaviour of an extra stack frame
+    import airflow.models
+    # Cache inspect.signature for the wrapper closure to avoid calling it
+    # at every decorated invocation. This is separate sig_cache created
+    # per decoration, i.e. each function decorated using apply_defaults will
+    # have a different sig_cache.
+    sig_cache = signature(func)
+    non_optional_args = {
+        name for (name, param) in sig_cache.parameters.items()
+        if param.default == param.empty and
+        param.name != 'self' and
+        param.kind not in (param.VAR_POSITIONAL, param.VAR_KEYWORD)}
+
     @wraps(func)
     def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
+        if len(args) > 1:
+            raise AirflowException(
+                "Use keyword arguments when initializing operators")
+        dag_args = {}
+        dag_params = {}
 
-    return cast(T, wrapper)
+        dag = kwargs.get('dag', None) or airflow.models._CONTEXT_MANAGER_DAG
+        if dag:
+            dag_args = copy(dag.default_args) or {}
+            dag_params = copy(dag.params) or {}
 
+        params = {}
+        if 'params' in kwargs:
+            params = kwargs['params']
+        dag_params.update(params)
 
-def remove_task_decorator(python_source: str, task_decorator_name: str) -> str:
-    """
-    Removes @task or similar decorators as well as @setup and @teardown
+        default_args = {}
+        if 'default_args' in kwargs:
+            default_args = kwargs['default_args']
+            if 'params' in default_args:
+                dag_params.update(default_args['params'])
+                del default_args['params']
 
-    :param python_source: The python source code
-    :param task_decorator_name: the decorator name
-    """
+        dag_args.update(default_args)
+        default_args = dag_args
 
-    def _remove_task_decorator(py_source, decorator_name):
-        if decorator_name not in py_source:
-            return python_source
-        split = python_source.split(decorator_name)
-        before_decorator, after_decorator = split[0], split[1]
-        if after_decorator[0] == "(":
-            after_decorator = _balance_parens(after_decorator)
-        if after_decorator[0] == "\n":
-            after_decorator = after_decorator[1:]
-        return before_decorator + after_decorator
+        for arg in sig_cache.parameters:
+            if arg not in kwargs and arg in default_args:
+                kwargs[arg] = default_args[arg]
+        missing_args = list(non_optional_args - set(kwargs))
+        if missing_args:
+            msg = "Argument {0} is required".format(missing_args)
+            raise AirflowException(msg)
 
-    decorators = ["@setup", "@teardown", task_decorator_name]
-    for decorator in decorators:
-        python_source = _remove_task_decorator(python_source, decorator)
-    return python_source
+        kwargs['params'] = dag_params
 
+        result = func(*args, **kwargs)
+        return result
+    return wrapper
 
-def _balance_parens(after_decorator):
-    num_paren = 1
-    after_decorator = deque(after_decorator)
-    after_decorator.popleft()
-    while num_paren:
-        current = after_decorator.popleft()
-        if current == "(":
-            num_paren = num_paren + 1
-        elif current == ")":
-            num_paren = num_paren - 1
-    return "".join(after_decorator)
-
-
-class _autostacklevel_warn:
-    def __init__(self):
-        self.warnings = __import__("warnings")
-
-    def __getattr__(self, name):
-        return getattr(self.warnings, name)
-
-    def __dir__(self):
-        return dir(self.warnings)
-
-    def warn(self, message, category=None, stacklevel=1, source=None):
-        self.warnings.warn(message, category, stacklevel + 2, source)
-
-
-def fixup_decorator_warning_stack(func):
-    if func.__globals__.get("warnings") is sys.modules["warnings"]:
-        # Yes, this is more than slightly hacky, but it _automatically_ sets the right stacklevel parameter to
-        # `warnings.warn` to ignore the decorator.
-        func.__globals__["warnings"] = _autostacklevel_warn()
+if 'BUILDING_AIRFLOW_DOCS' in os.environ:
+    # Monkey patch hook to get good function headers while building docs
+    apply_defaults = lambda x: x

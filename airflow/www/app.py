@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,173 +16,174 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
-
-import warnings
-from datetime import timedelta
-from tempfile import gettempdir
+#
+import six
 
 from flask import Flask
-from flask_appbuilder import SQLA
+from flask_admin import Admin, base
 from flask_caching import Cache
 from flask_wtf.csrf import CSRFProtect
-from markupsafe import Markup
-from sqlalchemy.engine.url import make_url
+from six.moves.urllib.parse import urlparse
+from werkzeug.wsgi import DispatcherMiddleware
+from werkzeug.contrib.fixers import ProxyFix
 
-from airflow import settings
-from airflow.api_internal.internal_api_call import InternalApiConfig
-from airflow.configuration import conf
-from airflow.exceptions import AirflowConfigException, RemovedInAirflow3Warning
+import airflow
+from airflow import configuration as conf
+from airflow import models, LoggingMixin
+from airflow.settings import Session
+
+from airflow.www.blueprints import routes
 from airflow.logging_config import configure_logging
-from airflow.models import import_all_models
-from airflow.utils.json import AirflowJsonProvider
-from airflow.www.extensions.init_appbuilder import init_appbuilder
-from airflow.www.extensions.init_appbuilder_links import init_appbuilder_links
-from airflow.www.extensions.init_dagbag import init_dagbag
-from airflow.www.extensions.init_jinja_globals import init_jinja_globals
-from airflow.www.extensions.init_manifest_files import configure_manifest_files
-from airflow.www.extensions.init_robots import init_robots
-from airflow.www.extensions.init_security import (
-    init_api_experimental_auth,
-    init_check_user_active,
-    init_xframe_protection,
-)
-from airflow.www.extensions.init_session import init_airflow_session_interface
-from airflow.www.extensions.init_views import (
-    init_api_connexion,
-    init_api_experimental,
-    init_api_internal,
-    init_appbuilder_views,
-    init_error_handlers,
-    init_flash_views,
-    init_plugins,
-)
-from airflow.www.extensions.init_wsgi_middlewares import init_wsgi_middleware
+from airflow import jobs
+from airflow import settings
+from airflow import configuration
+from airflow.utils.net import get_hostname
 
-app: Flask | None = None
-
-# Initializes at the module level, so plugins can access it.
-# See: /docs/plugins.rst
 csrf = CSRFProtect()
 
 
-def sync_appbuilder_roles(flask_app):
-    """Sync appbuilder roles to DB"""
-    # Garbage collect old permissions/views after they have been modified.
-    # Otherwise, when the name of a view or menu is changed, the framework
-    # will add the new Views and Menus names to the backend, but will not
-    # delete the old ones.
-    if conf.getboolean("webserver", "UPDATE_FAB_PERMS"):
-        flask_app.appbuilder.sm.sync_roles()
-
-
 def create_app(config=None, testing=False):
-    """Create a new instance of Airflow WWW app"""
-    flask_app = Flask(__name__)
-    flask_app.secret_key = conf.get("webserver", "SECRET_KEY")
+    app = Flask(__name__)
+    if configuration.conf.getboolean('webserver', 'ENABLE_PROXY_FIX'):
+        app.wsgi_app = ProxyFix(app.wsgi_app)
+    app.secret_key = configuration.conf.get('webserver', 'SECRET_KEY')
+    app.config['LOGIN_DISABLED'] = not configuration.conf.getboolean(
+        'webserver', 'AUTHENTICATE')
 
-    flask_app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=settings.get_session_lifetime_config())
-    flask_app.config.from_pyfile(settings.WEBSERVER_CONFIG, silent=True)
-    flask_app.config["TESTING"] = testing
-    flask_app.config["SQLALCHEMY_DATABASE_URI"] = conf.get("database", "SQL_ALCHEMY_CONN")
+    csrf.init_app(app)
 
-    instance_name = conf.get(section="webserver", key="instance_name", fallback="Airflow")
-    instance_name_has_markup = conf.getboolean(
-        section="webserver", key="instance_name_has_markup", fallback=False
-    )
-    if instance_name_has_markup:
-        instance_name = Markup(instance_name).striptags()
+    app.config['TESTING'] = testing
 
-    flask_app.config["APP_NAME"] = instance_name
+    airflow.load_login()
+    airflow.login.login_manager.init_app(app)
 
-    url = make_url(flask_app.config["SQLALCHEMY_DATABASE_URI"])
-    if url.drivername == "sqlite" and url.database and not url.database.startswith("/"):
-        raise AirflowConfigException(
-            f'Cannot use relative path: `{conf.get("database", "SQL_ALCHEMY_CONN")}` to connect to sqlite. '
-            "Please use absolute path such as `sqlite:////tmp/airflow.db`."
-        )
+    from airflow import api
+    api.load_auth()
+    api.api_auth.init_app(app)
 
-    flask_app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    cache = Cache(
+        app=app, config={'CACHE_TYPE': 'filesystem', 'CACHE_DIR': '/tmp'})
 
-    flask_app.config["SESSION_COOKIE_HTTPONLY"] = True
-    flask_app.config["SESSION_COOKIE_SECURE"] = conf.getboolean("webserver", "COOKIE_SECURE")
-
-    cookie_samesite_config = conf.get("webserver", "COOKIE_SAMESITE")
-    if cookie_samesite_config == "":
-        warnings.warn(
-            "Old deprecated value found for `cookie_samesite` option in `[webserver]` section. "
-            "Using `Lax` instead. Change the value to `Lax` in airflow.cfg to remove this warning.",
-            RemovedInAirflow3Warning,
-        )
-        cookie_samesite_config = "Lax"
-    flask_app.config["SESSION_COOKIE_SAMESITE"] = cookie_samesite_config
-
-    if config:
-        flask_app.config.from_mapping(config)
-
-    if "SQLALCHEMY_ENGINE_OPTIONS" not in flask_app.config:
-        flask_app.config["SQLALCHEMY_ENGINE_OPTIONS"] = settings.prepare_engine_args()
-
-    # Configure the JSON encoder used by `|tojson` filter from Flask
-    flask_app.json_provider_class = AirflowJsonProvider
-    flask_app.json = AirflowJsonProvider(flask_app)
-
-    InternalApiConfig.force_database_direct_access()
-
-    csrf.init_app(flask_app)
-
-    init_wsgi_middleware(flask_app)
-
-    db = SQLA()
-    db.session = settings.Session
-    db.init_app(flask_app)
-
-    init_dagbag(flask_app)
-
-    init_api_experimental_auth(flask_app)
-
-    init_robots(flask_app)
-
-    cache_config = {"CACHE_TYPE": "flask_caching.backends.filesystem", "CACHE_DIR": gettempdir()}
-    Cache(app=flask_app, config=cache_config)
-
-    init_flash_views(flask_app)
+    app.register_blueprint(routes)
 
     configure_logging()
-    configure_manifest_files(flask_app)
 
-    import_all_models()
+    with app.app_context():
+        from airflow.www import views
 
-    with flask_app.app_context():
-        init_appbuilder(flask_app)
+        admin = Admin(
+            app, name='Airflow',
+            static_url_path='/admin',
+            index_view=views.HomeView(endpoint='', url='/admin', name="DAGs"),
+            template_mode='bootstrap3',
+        )
+        av = admin.add_view
+        vs = views
+        av(vs.Airflow(name='DAGs', category='DAGs'))
 
-        init_appbuilder_views(flask_app)
-        init_appbuilder_links(flask_app)
-        init_plugins(flask_app)
-        init_error_handlers(flask_app)
-        init_api_connexion(flask_app)
-        if conf.getboolean("webserver", "run_internal_api", fallback=False):
-            init_api_internal(flask_app)
-        init_api_experimental(flask_app)
+        if not conf.getboolean('core', 'secure_mode'):
+            av(vs.QueryView(name='Ad Hoc Query', category="Data Profiling"))
+            av(vs.ChartModelView(
+                models.Chart, Session, name="Charts", category="Data Profiling"))
+        av(vs.KnownEventView(
+            models.KnownEvent,
+            Session, name="Known Events", category="Data Profiling"))
+        av(vs.SlaMissModelView(
+            models.SlaMiss,
+            Session, name="SLA Misses", category="Browse"))
+        av(vs.TaskInstanceModelView(models.TaskInstance,
+            Session, name="Task Instances", category="Browse"))
+        av(vs.LogModelView(
+            models.Log, Session, name="Logs", category="Browse"))
+        av(vs.JobModelView(
+            jobs.BaseJob, Session, name="Jobs", category="Browse"))
+        av(vs.PoolModelView(
+            models.Pool, Session, name="Pools", category="Admin"))
+        av(vs.ConfigurationView(
+            name='Configuration', category="Admin"))
+        av(vs.UserModelView(
+            models.User, Session, name="Users", category="Admin"))
+        av(vs.ConnectionModelView(
+            models.Connection, Session, name="Connections", category="Admin"))
+        av(vs.VariableView(
+            models.Variable, Session, name="Variables", category="Admin"))
+        av(vs.XComView(
+            models.XCom, Session, name="XComs", category="Admin"))
 
-        sync_appbuilder_roles(flask_app)
+        admin.add_link(base.MenuLink(
+            category='Docs', name='Documentation',
+            url='https://airflow.incubator.apache.org/'))
+        admin.add_link(
+            base.MenuLink(category='Docs',
+                          name='Github',
+                          url='https://github.com/apache/incubator-airflow'))
 
-        init_jinja_globals(flask_app)
-        init_xframe_protection(flask_app)
-        init_airflow_session_interface(flask_app)
-        init_check_user_active(flask_app)
-    return flask_app
+        av(vs.VersionView(name='Version', category="About"))
+
+        av(vs.DagRunModelView(
+            models.DagRun, Session, name="DAG Runs", category="Browse"))
+        av(vs.DagModelView(models.DagModel, Session, name=None))
+        # Hack to not add this view to the menu
+        admin._menu = admin._menu[:-1]
+
+        def integrate_plugins():
+            """Integrate plugins to the context"""
+            log = LoggingMixin().log
+            from airflow.plugins_manager import (
+                admin_views, flask_blueprints, menu_links)
+            for v in admin_views:
+                log.debug('Adding view %s', v.name)
+                admin.add_view(v)
+            for bp in flask_blueprints:
+                log.debug('Adding blueprint %s', bp.name)
+                app.register_blueprint(bp)
+            for ml in sorted(menu_links, key=lambda x: x.name):
+                log.debug('Adding menu link %s', ml.name)
+                admin.add_link(ml)
+
+        integrate_plugins()
+
+        import airflow.www.api.experimental.endpoints as e
+        # required for testing purposes otherwise the module retains
+        # a link to the default_auth
+        if app.config['TESTING']:
+            if six.PY2:
+                reload(e)
+            else:
+                import importlib
+                importlib.reload(e)
+
+        app.register_blueprint(e.api_experimental, url_prefix='/api/experimental')
+
+        @app.context_processor
+        def jinja_globals():
+            return {
+                'hostname': get_hostname(),
+                'navbar_color': configuration.get('webserver', 'NAVBAR_COLOR'),
+            }
+
+        @app.teardown_appcontext
+        def shutdown_session(exception=None):
+            settings.Session.remove()
+
+        return app
+
+
+app = None
+
+
+def root_app(env, resp):
+    resp(b'404 Not Found', [(b'Content-Type', b'text/plain')])
+    return [b'Apache Airflow is not at this location']
 
 
 def cached_app(config=None, testing=False):
-    """Return cached instance of Airflow WWW app"""
     global app
     if not app:
-        app = create_app(config=config, testing=testing)
+        base_url = urlparse(configuration.conf.get('webserver', 'base_url'))[2]
+        if not base_url or base_url == '/':
+            base_url = ""
+
+        app = create_app(config, testing)
+        app = DispatcherMiddleware(root_app, {base_url: app})
     return app
-
-
-def purge_cached_app():
-    """Removes the cached version of the app in global state."""
-    global app
-    app = None

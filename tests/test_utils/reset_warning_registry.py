@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -6,20 +7,19 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-#
+# 
 #   http://www.apache.org/licenses/LICENSE-2.0
-#
+# 
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
 
 import re
 import sys
-from typing import Match
+
 
 # We need to explicitly clear the warning registry context
 # https://docs.python.org/2/library/warnings.html
@@ -28,11 +28,10 @@ from typing import Match
 # not be seen again unless the warnings registry related to the warning has
 # been cleared.
 #
-
-
 # Proposed fix from Stack overflow, which refers to the Python bug-page
+# noqa
 # https://stackoverflow.com/questions/19428761/python-showing-once-warnings-again-resetting-all-warning-registries
-class reset_warning_registry:
+class reset_warning_registry(object):
     """
     context manager which archives & clears warning registry for duration of
     context.
@@ -43,10 +42,10 @@ class reset_warning_registry:
     """
 
     #: regexp for filtering which modules are reset
-    _pattern: Match[str] | None = None
+    _pattern = None
 
     #: dict mapping module name -> old registry contents
-    _backup: dict | None = None
+    _backup = None
 
     def __init__(self, pattern=None):
         self._pattern = re.compile(pattern or ".*")
@@ -59,7 +58,7 @@ class reset_warning_registry:
         for name, mod in list(sys.modules.items()):
             if pattern.match(name):
                 reg = getattr(mod, "__warningregistry__", None)
-                if reg and isinstance(reg, dict):
+                if reg:
                     backup[name] = reg.copy()
                     reg.clear()
         return self
@@ -84,5 +83,5 @@ class reset_warning_registry:
         for name, mod in list(modules.items()):
             if pattern.match(name) and name not in backup:
                 reg = getattr(mod, "__warningregistry__", None)
-                if reg and isinstance(reg, dict):
+                if reg:
                     reg.clear()

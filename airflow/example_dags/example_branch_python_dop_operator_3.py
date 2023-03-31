@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,46 +16,44 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""
-Example DAG demonstrating the usage of ``@task.branch`` TaskFlow API decorator with depends_on_past=True,
-where tasks may be run or skipped on alternating runs.
-"""
-from __future__ import annotations
 
-import pendulum
+import airflow
+from airflow.models import DAG
+from airflow.operators.dummy_operator import DummyOperator
+from airflow.operators.python_operator import BranchPythonOperator
 
-from airflow import DAG
-from airflow.decorators import task
-from airflow.operators.empty import EmptyOperator
+args = {
+    'owner': 'airflow',
+    'start_date': airflow.utils.dates.days_ago(2),
+    'depends_on_past': True,
+}
+
+# BranchPython operator that depends on past
+# and where tasks may run or be skipped on
+# alternating runs
+dag = DAG(
+    dag_id='example_branch_dop_operator_v3',
+    schedule_interval='*/1 * * * *',
+    default_args=args,
+)
 
 
-@task.branch()
-def should_run(**kwargs) -> str:
-    """
-    Determine which empty_task should be run based on if the execution date minute is even or odd.
-
-    :param dict kwargs: Context
-    :return: Id of the task to run
-    """
-    print(
-        f"------------- exec dttm = {kwargs['execution_date']} and minute = {kwargs['execution_date'].minute}"
-    )
-    if kwargs["execution_date"].minute % 2 == 0:
-        return "empty_task_1"
+def should_run(**kwargs):
+    print('------------- exec dttm = {} and minute = {}'.
+          format(kwargs['execution_date'], kwargs['execution_date'].minute))
+    if kwargs['execution_date'].minute % 2 == 0:
+        return "oper_1"
     else:
-        return "empty_task_2"
+        return "oper_2"
 
 
-with DAG(
-    dag_id="example_branch_dop_operator_v3",
-    schedule="*/1 * * * *",
-    start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
-    catchup=False,
-    default_args={"depends_on_past": True},
-    tags=["example"],
-) as dag:
-    cond = should_run()
+cond = BranchPythonOperator(
+    task_id='condition',
+    provide_context=True,
+    python_callable=should_run,
+    dag=dag,
+)
 
-    empty_task_1 = EmptyOperator(task_id="empty_task_1")
-    empty_task_2 = EmptyOperator(task_id="empty_task_2")
-    cond >> [empty_task_1, empty_task_2]
+dummy_task_1 = DummyOperator(task_id='dummy_task_1', dag=dag)
+dummy_task_2 = DummyOperator(task_id='dummy_task_2', dag=dag)
+cond >> [dummy_task_1, dummy_task_2]

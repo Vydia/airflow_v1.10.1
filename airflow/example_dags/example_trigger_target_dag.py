@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,41 +16,61 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""
-Example usage of the TriggerDagRunOperator. This example holds 2 DAGs:
-1. 1st DAG (example_trigger_controller_dag) holds a TriggerDagRunOperator, which will trigger the 2nd DAG
-2. 2nd DAG (example_trigger_target_dag) which will be triggered by the TriggerDagRunOperator in the 1st DAG
-"""
-from __future__ import annotations
 
-import pendulum
+import pprint
+from datetime import datetime
 
-from airflow import DAG
-from airflow.decorators import task
-from airflow.operators.bash import BashOperator
+from airflow.models import DAG
+from airflow.operators.bash_operator import BashOperator
+from airflow.operators.python_operator import PythonOperator
+
+pp = pprint.PrettyPrinter(indent=4)
+
+# This example illustrates the use of the TriggerDagRunOperator. There are 2
+# entities at work in this scenario:
+# 1. The Controller DAG - the DAG that conditionally executes the trigger
+#    (in example_trigger_controller.py)
+# 2. The Target DAG - DAG being triggered
+#
+# This example illustrates the following features :
+# 1. A TriggerDagRunOperator that takes:
+#   a. A python callable that decides whether or not to trigger the Target DAG
+#   b. An optional params dict passed to the python callable to help in
+#      evaluating whether or not to trigger the Target DAG
+#   c. The id (name) of the Target DAG
+#   d. The python callable can add contextual info to the DagRun created by
+#      way of adding a Pickleable payload (e.g. dictionary of primitives). This
+#      state is then made available to the TargetDag
+# 2. A Target DAG : c.f. example_trigger_target_dag.py
+
+args = {
+    'start_date': datetime.utcnow(),
+    'owner': 'airflow',
+}
+
+dag = DAG(
+    dag_id='example_trigger_target_dag',
+    default_args=args,
+    schedule_interval=None,
+)
 
 
-@task(task_id="run_this")
-def run_this_func(dag_run=None):
-    """
-    Print the payload "message" passed to the DagRun conf attribute.
-
-    :param dag_run: The DagRun object
-    """
-    print(f"Remotely received value of {dag_run.conf.get('message')} for key=message")
+def run_this_func(ds, **kwargs):
+    print("Remotely received value of {} for key=message".
+          format(kwargs['dag_run'].conf['message']))
 
 
-with DAG(
-    dag_id="example_trigger_target_dag",
-    start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
-    catchup=False,
-    schedule=None,
-    tags=["example"],
-) as dag:
-    run_this = run_this_func()
+run_this = PythonOperator(
+    task_id='run_this',
+    provide_context=True,
+    python_callable=run_this_func,
+    dag=dag,
+)
 
-    bash_task = BashOperator(
-        task_id="bash_task",
-        bash_command='echo "Here is the message: $message"',
-        env={"message": '{{ dag_run.conf.get("message") }}'},
-    )
+# You can also access the DagRun object in templates
+bash_task = BashOperator(
+    task_id="bash_task",
+    bash_command='echo "Here is the message: '
+                 '{{ dag_run.conf["message"] if dag_run else "" }}" ',
+    dag=dag,
+)

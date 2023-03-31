@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,51 +16,54 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Example DAG demonstrating the usage of the BranchPythonOperator."""
-from __future__ import annotations
 
 import random
 
-import pendulum
+import airflow
+from airflow.models import DAG
+from airflow.operators.dummy_operator import DummyOperator
+from airflow.operators.python_operator import BranchPythonOperator
 
-from airflow import DAG
-from airflow.operators.empty import EmptyOperator
-from airflow.operators.python import BranchPythonOperator
-from airflow.utils.edgemodifier import Label
-from airflow.utils.trigger_rule import TriggerRule
+args = {
+    'owner': 'airflow',
+    'start_date': airflow.utils.dates.days_ago(2),
+}
 
-with DAG(
-    dag_id="example_branch_operator",
-    start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
-    catchup=False,
-    schedule="@daily",
-    tags=["example", "example2"],
-) as dag:
-    run_this_first = EmptyOperator(
-        task_id="run_this_first",
+dag = DAG(
+    dag_id='example_branch_operator',
+    default_args=args,
+    schedule_interval="@daily",
+)
+
+run_this_first = DummyOperator(
+    task_id='run_this_first',
+    dag=dag,
+)
+
+options = ['branch_a', 'branch_b', 'branch_c', 'branch_d']
+
+branching = BranchPythonOperator(
+    task_id='branching',
+    python_callable=lambda: random.choice(options),
+    dag=dag,
+)
+run_this_first >> branching
+
+join = DummyOperator(
+    task_id='join',
+    trigger_rule='one_success',
+    dag=dag,
+)
+
+for option in options:
+    t = DummyOperator(
+        task_id=option,
+        dag=dag,
     )
 
-    options = ["branch_a", "branch_b", "branch_c", "branch_d"]
-
-    branching = BranchPythonOperator(
-        task_id="branching",
-        python_callable=lambda: random.choice(options),
-    )
-    run_this_first >> branching
-
-    join = EmptyOperator(
-        task_id="join",
-        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
+    dummy_follow = DummyOperator(
+        task_id='follow_' + option,
+        dag=dag,
     )
 
-    for option in options:
-        t = EmptyOperator(
-            task_id=option,
-        )
-
-        empty_follow = EmptyOperator(
-            task_id="follow_" + option,
-        )
-
-        # Label is optional here, but it can help identify more complex branches
-        branching >> Label(option) >> t >> empty_follow >> join
+    branching >> t >> dummy_follow >> join

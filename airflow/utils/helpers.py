@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,111 +16,103 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
+#
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
 
-import copy
-import re
-import signal
-import warnings
+import psutil
+
+from builtins import input
+from past.builtins import basestring
 from datetime import datetime
 from functools import reduce
-from itertools import filterfalse, tee
-from typing import TYPE_CHECKING, Any, Callable, Generator, Iterable, Mapping, MutableMapping, TypeVar, cast
+import imp
+import os
+import re
+import signal
+import subprocess
+import sys
+import warnings
 
-from airflow.configuration import conf
-from airflow.exceptions import AirflowException, RemovedInAirflow3Warning
-from airflow.utils.context import Context
-from airflow.utils.module_loading import import_string
-from airflow.utils.types import NOTSET
+from jinja2 import Template
 
-if TYPE_CHECKING:
-    import jinja2
+from airflow import configuration
+from airflow.exceptions import AirflowException
 
-    from airflow.models.taskinstance import TaskInstance
-
-KEY_REGEX = re.compile(r"^[\w.-]+$")
-GROUP_KEY_REGEX = re.compile(r"^[\w-]+$")
-CAMELCASE_TO_SNAKE_CASE_REGEX = re.compile(r"(?!^)([A-Z]+)")
-
-T = TypeVar("T")
-S = TypeVar("S")
+# When killing processes, time to wait after issuing a SIGTERM before issuing a
+# SIGKILL.
+DEFAULT_TIME_TO_WAIT_AFTER_SIGTERM = configuration.conf.getint(
+    'core', 'KILLED_TASK_CLEANUP_TIME'
+)
 
 
-def validate_key(k: str, max_length: int = 250):
-    """Validates value used as a key."""
-    if not isinstance(k, str):
-        raise TypeError(f"The key has to be a string and is {type(k)}:{k}")
-    if len(k) > max_length:
-        raise AirflowException(f"The key has to be less than {max_length} characters")
-    if not KEY_REGEX.match(k):
+def validate_key(k, max_length=250):
+    if not isinstance(k, basestring):
+        raise TypeError("The key has to be a string")
+    elif len(k) > max_length:
         raise AirflowException(
-            f"The key {k!r} has to be made of alphanumeric characters, dashes, "
-            f"dots and underscores exclusively"
-        )
-
-
-def validate_group_key(k: str, max_length: int = 200):
-    """Validates value used as a group key."""
-    if not isinstance(k, str):
-        raise TypeError(f"The key has to be a string and is {type(k)}:{k}")
-    if len(k) > max_length:
-        raise AirflowException(f"The key has to be less than {max_length} characters")
-    if not GROUP_KEY_REGEX.match(k):
+            "The key has to be less than {0} characters".format(max_length))
+    elif not re.match(r'^[A-Za-z0-9_\-\.]+$', k):
         raise AirflowException(
-            f"The key {k!r} has to be made of alphanumeric characters, dashes and underscores exclusively"
-        )
+            "The key ({k}) has to be made of alphanumeric characters, dashes, "
+            "dots and underscores exclusively".format(**locals()))
+    else:
+        return True
 
 
-def alchemy_to_dict(obj: Any) -> dict | None:
-    """Transforms a SQLAlchemy model instance into a dictionary"""
+def alchemy_to_dict(obj):
+    """
+    Transforms a SQLAlchemy model instance into a dictionary
+    """
     if not obj:
         return None
-    output = {}
-    for col in obj.__table__.columns:
-        value = getattr(obj, col.name)
-        if isinstance(value, datetime):
+    d = {}
+    for c in obj.__table__.columns:
+        value = getattr(obj, c.name)
+        if type(value) == datetime:
             value = value.isoformat()
-        output[col.name] = value
-    return output
+        d[c.name] = value
+    return d
 
 
-def ask_yesno(question: str, default: bool | None = None) -> bool:
-    """Helper to get a yes or no answer from the user."""
-    yes = {"yes", "y"}
-    no = {"no", "n"}
+def ask_yesno(question):
+    yes = set(['yes', 'y'])
+    no = set(['no', 'n'])
 
+    done = False
     print(question)
-    while True:
+    while not done:
         choice = input().lower()
-        if choice == "" and default is not None:
-            return default
         if choice in yes:
             return True
-        if choice in no:
+        elif choice in no:
             return False
-        print("Please respond with y/yes or n/no.")
+        else:
+            print("Please respond by yes or no.")
 
 
-def prompt_with_timeout(question: str, timeout: int, default: bool | None = None) -> bool:
-    """Ask the user a question and timeout if they don't respond"""
-
-    def handler(signum, frame):
-        raise AirflowException(f"Timeout {timeout}s reached")
-
-    signal.signal(signal.SIGALRM, handler)
-    signal.alarm(timeout)
-    try:
-        return ask_yesno(question, default)
-    finally:
-        signal.alarm(0)
+def is_in(obj, l):
+    """
+    Checks whether an object is one of the item in the list.
+    This is different from ``in`` because ``in`` uses __cmp__ when
+    present. Here we change based on the object itself
+    """
+    for item in l:
+        if item is obj:
+            return True
+    return False
 
 
-def is_container(obj: Any) -> bool:
-    """Test if an object is a container (iterable) but not a string"""
-    return hasattr(obj, "__iter__") and not isinstance(obj, str)
+def is_container(obj):
+    """
+    Test if an object is a container (iterable) but not a string
+    """
+    return hasattr(obj, '__iter__') and not isinstance(obj, basestring)
 
 
-def as_tuple(obj: Any) -> tuple:
+def as_tuple(obj):
     """
     If obj is a container, returns obj as a tuple.
     Otherwise, returns a tuple containing obj.
@@ -130,15 +123,17 @@ def as_tuple(obj: Any) -> tuple:
         return tuple([obj])
 
 
-def chunks(items: list[T], chunk_size: int) -> Generator[list[T], None, None]:
-    """Yield successive chunks of a given size from a list of items"""
-    if chunk_size <= 0:
-        raise ValueError("Chunk size must be a positive integer")
+def chunks(items, chunk_size):
+    """
+    Yield successive chunks of a given size from a list of items
+    """
+    if (chunk_size <= 0):
+        raise ValueError('Chunk size must be a positive integer')
     for i in range(0, len(items), chunk_size):
-        yield items[i : i + chunk_size]
+        yield items[i:i + chunk_size]
 
 
-def reduce_in_chunks(fn: Callable[[S, list[T]], S], iterable: list[T], initializer: S, chunk_size: int = 0):
+def reduce_in_chunks(fn, iterable, initializer, chunk_size=0):
     """
     Reduce the given list of items by splitting it into chunks
     of the given size and passing each chunk through the reducer
@@ -150,7 +145,7 @@ def reduce_in_chunks(fn: Callable[[S, list[T]], S], iterable: list[T], initializ
     return reduce(fn, chunks(iterable, chunk_size), initializer)
 
 
-def as_flattened_list(iterable: Iterable[Iterable[T]]) -> list[T]:
+def as_flattened_list(iterable):
     """
     Return an iterable with one level flattened
 
@@ -160,224 +155,222 @@ def as_flattened_list(iterable: Iterable[Iterable[T]]) -> list[T]:
     return [e for i in iterable for e in i]
 
 
-def parse_template_string(template_string: str) -> tuple[str | None, jinja2.Template | None]:
-    """Parses Jinja template string."""
-    import jinja2
+def chain(*tasks):
+    """
+    Given a number of tasks, builds a dependency chain.
 
+    chain(task_1, task_2, task_3, task_4)
+
+    is equivalent to
+
+    task_1.set_downstream(task_2)
+    task_2.set_downstream(task_3)
+    task_3.set_downstream(task_4)
+    """
+    for up_task, down_task in zip(tasks[:-1], tasks[1:]):
+        up_task.set_downstream(down_task)
+
+
+def pprinttable(rows):
+    """Returns a pretty ascii table from tuples
+
+    If namedtuple are used, the table will have headers
+    """
+    if not rows:
+        return
+    if hasattr(rows[0], '_fields'):  # if namedtuple
+        headers = rows[0]._fields
+    else:
+        headers = ["col{}".format(i) for i in range(len(rows[0]))]
+    lens = [len(s) for s in headers]
+
+    for row in rows:
+        for i in range(len(rows[0])):
+            slenght = len("{}".format(row[i]))
+            if slenght > lens[i]:
+                lens[i] = slenght
+    formats = []
+    hformats = []
+    for i in range(len(rows[0])):
+        if isinstance(rows[0][i], int):
+            formats.append("%%%dd" % lens[i])
+        else:
+            formats.append("%%-%ds" % lens[i])
+        hformats.append("%%-%ds" % lens[i])
+    pattern = " | ".join(formats)
+    hpattern = " | ".join(hformats)
+    separator = "-+-".join(['-' * n for n in lens])
+    s = ""
+    s += separator + '\n'
+    s += (hpattern % tuple(headers)) + '\n'
+    s += separator + '\n'
+
+    def f(t):
+        return "{}".format(t) if isinstance(t, basestring) else t
+
+    for line in rows:
+        s += pattern % tuple(f(t) for t in line) + '\n'
+    s += separator + '\n'
+    return s
+
+
+def reap_process_group(pid, log, sig=signal.SIGTERM,
+                       timeout=DEFAULT_TIME_TO_WAIT_AFTER_SIGTERM):
+    """
+    Tries really hard to terminate all children (including grandchildren). Will send
+    sig (SIGTERM) to the process group of pid. If any process is alive after timeout
+    a SIGKILL will be send.
+
+    :param log: log handler
+    :param pid: pid to kill
+    :param sig: signal type
+    :param timeout: how much time a process has to terminate
+    """
+    def on_terminate(p):
+        log.info("Process %s (%s) terminated with exit code %s", p, p.pid, p.returncode)
+
+    if pid == os.getpid():
+        raise RuntimeError("I refuse to kill myself")
+
+    parent = psutil.Process(pid)
+
+    children = parent.children(recursive=True)
+    children.append(parent)
+
+    log.info("Sending %s to GPID %s", sig, os.getpgid(pid))
+    os.killpg(os.getpgid(pid), sig)
+
+    gone, alive = psutil.wait_procs(children, timeout=timeout, callback=on_terminate)
+
+    if alive:
+        for p in alive:
+            log.warn("process %s (%s) did not respond to SIGTERM. Trying SIGKILL", p, pid)
+
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+
+        gone, alive = psutil.wait_procs(alive, timeout=timeout, callback=on_terminate)
+        if alive:
+            for p in alive:
+                log.error("Process %s (%s) could not be killed. Giving up.", p, p.pid)
+
+
+def parse_template_string(template_string):
     if "{{" in template_string:  # jinja mode
-        return None, jinja2.Template(template_string)
+        return None, Template(template_string)
     else:
         return template_string, None
 
 
-def render_log_filename(ti: TaskInstance, try_number, filename_template) -> str:
+class AirflowImporter(object):
     """
-    Given task instance, try_number, filename_template, return the rendered log
-    filename
+    Importer that dynamically loads a class and module from its parent. This
+    allows Airflow to support ``from airflow.operators import BashOperator``
+    even though BashOperator is actually in
+    ``airflow.operators.bash_operator``.
 
-    :param ti: task instance
-    :param try_number: try_number of the task
-    :param filename_template: filename template, which can be jinja template or
-        python string template
-    """
-    filename_template, filename_jinja_template = parse_template_string(filename_template)
-    if filename_jinja_template:
-        jinja_context = ti.get_template_context()
-        jinja_context["try_number"] = try_number
-        return render_template_to_string(filename_jinja_template, jinja_context)
+    The importer also takes over for the parent_module by wrapping it. This is
+    required to support attribute-based usage:
 
-    return filename_template.format(
-        dag_id=ti.dag_id,
-        task_id=ti.task_id,
-        execution_date=ti.execution_date.isoformat(),
-        try_number=try_number,
-    )
+    .. code:: python
 
-
-def convert_camel_to_snake(camel_str: str) -> str:
-    """Converts CamelCase to snake_case."""
-    return CAMELCASE_TO_SNAKE_CASE_REGEX.sub(r"_\1", camel_str).lower()
-
-
-def merge_dicts(dict1: dict, dict2: dict) -> dict:
-    """
-    Merge two dicts recursively, returning new dict (input dict is not mutated).
-
-    Lists are not concatenated. Items in dict2 overwrite those also found in dict1.
-    """
-    merged = dict1.copy()
-    for k, v in dict2.items():
-        if k in merged and isinstance(v, dict):
-            merged[k] = merge_dicts(merged.get(k, {}), v)
-        else:
-            merged[k] = v
-    return merged
-
-
-def partition(pred: Callable[[T], bool], iterable: Iterable[T]) -> tuple[Iterable[T], Iterable[T]]:
-    """Use a predicate to partition entries into false entries and true entries"""
-    iter_1, iter_2 = tee(iterable)
-    return filterfalse(pred, iter_1), filter(pred, iter_2)
-
-
-def chain(*args, **kwargs):
-    """This function is deprecated. Please use `airflow.models.baseoperator.chain`."""
-    warnings.warn(
-        "This function is deprecated. Please use `airflow.models.baseoperator.chain`.",
-        RemovedInAirflow3Warning,
-        stacklevel=2,
-    )
-    return import_string("airflow.models.baseoperator.chain")(*args, **kwargs)
-
-
-def cross_downstream(*args, **kwargs):
-    """This function is deprecated. Please use `airflow.models.baseoperator.cross_downstream`."""
-    warnings.warn(
-        "This function is deprecated. Please use `airflow.models.baseoperator.cross_downstream`.",
-        RemovedInAirflow3Warning,
-        stacklevel=2,
-    )
-    return import_string("airflow.models.baseoperator.cross_downstream")(*args, **kwargs)
-
-
-def build_airflow_url_with_query(query: dict[str, Any]) -> str:
-    """
-    Build airflow url using base_url and default_view and provided query
-    For example:
-    'http://0.0.0.0:8000/base/graph?dag_id=my-task&root=&execution_date=2020-10-27T10%3A59%3A25.615587
-    """
-    import flask
-
-    view = conf.get_mandatory_value("webserver", "dag_default_view").lower()
-    return flask.url_for(f"Airflow.{view}", **query)
-
-
-# The 'template' argument is typed as Any because the jinja2.Template is too
-# dynamic to be effectively type-checked.
-def render_template(template: Any, context: MutableMapping[str, Any], *, native: bool) -> Any:
-    """Render a Jinja2 template with given Airflow context.
-
-    The default implementation of ``jinja2.Template.render()`` converts the
-    input context into dict eagerly many times, which triggers deprecation
-    messages in our custom context class. This takes the implementation apart
-    and retain the context mapping without resolving instead.
-
-    :param template: A Jinja2 template to render.
-    :param context: The Airflow task context to render the template with.
-    :param native: If set to *True*, render the template into a native type. A
-        DAG can enable this with ``render_template_as_native_obj=True``.
-    :returns: The render result.
-    """
-    context = copy.copy(context)
-    env = template.environment
-    if template.globals:
-        context.update((k, v) for k, v in template.globals.items() if k not in context)
-    try:
-        nodes = template.root_render_func(env.context_class(env, context, template.name, template.blocks))
-    except Exception:
-        env.handle_exception()  # Rewrite traceback to point to the template.
-    if native:
-        import jinja2.nativetypes
-
-        return jinja2.nativetypes.native_concat(nodes)
-    return "".join(nodes)
-
-
-def render_template_to_string(template: jinja2.Template, context: Context) -> str:
-    """Shorthand to ``render_template(native=False)`` with better typing support."""
-    return render_template(template, cast(MutableMapping[str, Any], context), native=False)
-
-
-def render_template_as_native(template: jinja2.Template, context: Context) -> Any:
-    """Shorthand to ``render_template(native=True)`` with better typing support."""
-    return render_template(template, cast(MutableMapping[str, Any], context), native=True)
-
-
-def exactly_one(*args) -> bool:
-    """
-    Returns True if exactly one of *args is "truthy", and False otherwise.
-
-    If user supplies an iterable, we raise ValueError and force them to unpack.
-    """
-    if is_container(args[0]):
-        raise ValueError(
-            "Not supported for iterable args. Use `*` to unpack your iterable in the function call."
-        )
-    return sum(map(bool, args)) == 1
-
-
-def at_most_one(*args) -> bool:
-    """
-    Returns True if at most one of *args is "truthy", and False otherwise.
-
-    NOTSET is treated the same as None.
-
-    If user supplies an iterable, we raise ValueError and force them to unpack.
+        from airflow import operators
+        operators.BashOperator(...)
     """
 
-    def is_set(val):
-        if val is NOTSET:
-            return False
-        else:
-            return bool(val)
+    def __init__(self, parent_module, module_attributes):
+        """
+        :param parent_module: The string package name of the parent module. For
+            example, 'airflow.operators'
+        :type parent_module: string
+        :param module_attributes: The file to class mappings for all importable
+            classes.
+        :type module_attributes: string
+        """
+        self._parent_module = parent_module
+        self._attribute_modules = self._build_attribute_modules(module_attributes)
+        self._loaded_modules = {}
 
-    return sum(map(is_set, args)) in (0, 1)
+        # Wrap the module so we can take over __getattr__.
+        sys.modules[parent_module.__name__] = self
 
+    @staticmethod
+    def _build_attribute_modules(module_attributes):
+        """
+        Flips and flattens the module_attributes dictionary from:
 
-def prune_dict(val: Any, mode="strict"):
-    """
-    Given dict ``val``, returns new dict based on ``val`` with all
-    empty elements removed.
+            module => [Attribute, ...]
 
-    What constitutes "empty" is controlled by the ``mode`` parameter.  If mode is 'strict'
-    then only ``None`` elements will be removed.  If mode is ``truthy``, then element ``x``
-    will be removed if ``bool(x) is False``.
-    """
+        To:
 
-    def is_empty(x):
-        if mode == "strict":
-            return x is None
-        elif mode == "truthy":
-            return bool(x) is False
-        raise ValueError("allowable values for `mode` include 'truthy' and 'strict'")
+            Attribute => module
 
-    if isinstance(val, dict):
-        new_dict = {}
-        for k, v in val.items():
-            if is_empty(v):
-                continue
-            elif isinstance(v, (list, dict)):
-                new_val = prune_dict(v, mode=mode)
-                if new_val:
-                    new_dict[k] = new_val
-            else:
-                new_dict[k] = v
-        return new_dict
-    elif isinstance(val, list):
-        new_list = []
-        for v in val:
-            if is_empty(v):
-                continue
-            elif isinstance(v, (list, dict)):
-                new_val = prune_dict(v, mode=mode)
-                if new_val:
-                    new_list.append(new_val)
-            else:
-                new_list.append(v)
-        return new_list
-    else:
-        return val
+        This is useful so that we can find the module to use, given an
+        attribute.
+        """
+        attribute_modules = {}
 
+        for module, attributes in list(module_attributes.items()):
+            for attribute in attributes:
+                attribute_modules[attribute] = module
 
-def prevent_duplicates(kwargs1: dict[str, Any], kwargs2: Mapping[str, Any], *, fail_reason: str) -> None:
-    """Ensure *kwargs1* and *kwargs2* do not contain common keys.
+        return attribute_modules
 
-    :raises TypeError: If common keys are found.
-    """
-    duplicated_keys = set(kwargs1).intersection(kwargs2)
-    if not duplicated_keys:
-        return
-    if len(duplicated_keys) == 1:
-        raise TypeError(f"{fail_reason} argument: {duplicated_keys.pop()}")
-    duplicated_keys_display = ", ".join(sorted(duplicated_keys))
-    raise TypeError(f"{fail_reason} arguments: {duplicated_keys_display}")
+    def _load_attribute(self, attribute):
+        """
+        Load the class attribute if it hasn't been loaded yet, and return it.
+        """
+        module = self._attribute_modules.get(attribute, False)
+
+        if not module:
+            # This shouldn't happen. The check happens in find_modules, too.
+            raise ImportError(attribute)
+        elif module not in self._loaded_modules:
+            # Note that it's very important to only load a given modules once.
+            # If they are loaded more than once, the memory reference to the
+            # class objects changes, and Python thinks that an object of type
+            # Foo that was declared before Foo's module was reloaded is no
+            # longer the same type as Foo after it's reloaded.
+            path = os.path.realpath(self._parent_module.__file__)
+            folder = os.path.dirname(path)
+            f, filename, description = imp.find_module(module, [folder])
+            self._loaded_modules[module] = imp.load_module(module, f, filename, description)
+
+            # This functionality is deprecated, and AirflowImporter should be
+            # removed in 2.0.
+            warnings.warn(
+                "Importing '{i}' directly from '{m}' has been "
+                "deprecated. Please import from "
+                "'{m}.[operator_module]' instead. Support for direct "
+                "imports will be dropped entirely in Airflow 2.0.".format(
+                    i=attribute, m=self._parent_module.__name__),
+                DeprecationWarning)
+
+        loaded_module = self._loaded_modules[module]
+
+        return getattr(loaded_module, attribute)
+
+    def __getattr__(self, attribute):
+        """
+        Get an attribute from the wrapped module. If the attribute doesn't
+        exist, try and import it as a class from a submodule.
+
+        This is a Python trick that allows the class to pretend it's a module,
+        so that attribute-based usage works:
+
+            from airflow import operators
+            operators.BashOperator(...)
+
+        It also allows normal from imports to work:
+
+            from airflow.operators.bash_operator import BashOperator
+        """
+        if hasattr(self._parent_module, attribute):
+            # Always default to the parent module if the attribute exists.
+            return getattr(self._parent_module, attribute)
+        elif attribute in self._attribute_modules:
+            # Try and import the attribute if it's got a module defined.
+            loaded_attribute = self._load_attribute(attribute)
+            setattr(self, attribute, loaded_attribute)
+            return loaded_attribute
+
+        raise AttributeError

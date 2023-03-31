@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,26 +16,28 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
 
-import bz2
-import gzip
-import shutil
 from tempfile import NamedTemporaryFile
+import shutil
+import gzip
+import bz2
 
 
 def uncompress_file(input_file_name, file_extension, dest_dir):
-    """Uncompress gz and bz2 files"""
-    if file_extension.lower() not in (".gz", ".bz2"):
-        raise NotImplementedError(
-            f"Received {file_extension} format. Only gz and bz2 files can currently be uncompressed."
-        )
-    if file_extension.lower() == ".gz":
+    """
+    Uncompress gz and bz2 files
+    """
+    if file_extension.lower() not in ('.gz', '.bz2'):
+        raise NotImplementedError("Received {} format. Only gz and bz2 "
+                                  "files can currently be uncompressed."
+                                  .format(file_extension))
+    if file_extension.lower() == '.gz':
         fmodule = gzip.GzipFile
-    elif file_extension.lower() == ".bz2":
+    elif file_extension.lower() == '.bz2':
         fmodule = bz2.BZ2File
-    with fmodule(input_file_name, mode="rb") as f_compressed, NamedTemporaryFile(
-        dir=dest_dir, mode="wb", delete=False
-    ) as f_uncompressed:
+    with fmodule(input_file_name, mode='rb') as f_compressed,\
+        NamedTemporaryFile(dir=dest_dir,
+                           mode='wb',
+                           delete=False) as f_uncompressed:
         shutil.copyfileobj(f_compressed, f_uncompressed)
     return f_uncompressed.name

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,29 +16,20 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Authentication backend that denies all requests."""
-from __future__ import annotations
 
 from functools import wraps
-from typing import Any, Callable, TypeVar, cast
-
 from flask import Response
 
-CLIENT_AUTH: tuple[str, str] | Any | None = None
+client_auth = None
 
 
-def init_app(_):
-    """Initialize authentication."""
+def init_app(app):
+    pass
 
 
-T = TypeVar("T", bound=Callable)
-
-
-def requires_authentication(function: T):
-    """Decorate functions that require authentication."""
-
+def requires_authentication(function):
     @wraps(function)
     def decorated(*args, **kwargs):
         return Response("Forbidden", 403)
 
-    return cast(T, decorated)
+    return decorated

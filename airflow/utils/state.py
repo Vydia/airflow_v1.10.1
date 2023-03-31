@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,176 +16,103 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
+#
+from __future__ import unicode_literals
 
-from enum import Enum
+from builtins import object
 
 
-class TaskInstanceState(str, Enum):
+class State(object):
     """
-    Enum that represents all possible states that a Task Instance can be in.
-
-    Note that None is also allowed, so always use this in a type hint with Optional.
-    """
-
-    # The scheduler sets a TaskInstance state to None when it's created but not
-    # yet run, but we don't list it here since TaskInstance is a string enum.
-    # Use None instead if need this state.
-
-    # Set by the scheduler
-    REMOVED = "removed"  # Task vanished from DAG before it ran
-    SCHEDULED = "scheduled"  # Task should run and will be handed to executor soon
-
-    # Set by the task instance itself
-    QUEUED = "queued"  # Executor has enqueued the task
-    RUNNING = "running"  # Task is executing
-    SUCCESS = "success"  # Task completed
-    SHUTDOWN = "shutdown"  # External request to shut down (e.g. marked failed when running)
-    RESTARTING = "restarting"  # External request to restart (e.g. cleared when running)
-    FAILED = "failed"  # Task errored out
-    UP_FOR_RETRY = "up_for_retry"  # Task failed but has retries left
-    UP_FOR_RESCHEDULE = "up_for_reschedule"  # A waiting `reschedule` sensor
-    UPSTREAM_FAILED = "upstream_failed"  # One or more upstream deps failed
-    SKIPPED = "skipped"  # Skipped by branching or some other mechanism
-    DEFERRED = "deferred"  # Deferrable operator waiting on a trigger
-
-    def __str__(self) -> str:
-        return self.value
-
-
-class DagRunState(str, Enum):
-    """
-    Enum that represents all possible states that a DagRun can be in.
-
-    These are "shared" with TaskInstanceState in some parts of the code,
-    so please ensure that their values always match the ones with the
-    same name in TaskInstanceState.
-    """
-
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCESS = "success"
-    FAILED = "failed"
-
-    def __str__(self) -> str:
-        return self.value
-
-
-class State:
-    """
-    Static class with task instance state constants and color methods to
+    Static class with task instance states constants and color method to
     avoid hardcoding.
     """
 
-    # Backwards-compat constants for code that does not yet use the enum
-    # These first three are shared by DagState and TaskState
-    SUCCESS = TaskInstanceState.SUCCESS
-    RUNNING = TaskInstanceState.RUNNING
-    FAILED = TaskInstanceState.FAILED
-
-    # These are TaskState only
+    # scheduler
     NONE = None
-    REMOVED = TaskInstanceState.REMOVED
-    SCHEDULED = TaskInstanceState.SCHEDULED
-    QUEUED = TaskInstanceState.QUEUED
-    SHUTDOWN = TaskInstanceState.SHUTDOWN
-    RESTARTING = TaskInstanceState.RESTARTING
-    UP_FOR_RETRY = TaskInstanceState.UP_FOR_RETRY
-    UP_FOR_RESCHEDULE = TaskInstanceState.UP_FOR_RESCHEDULE
-    UPSTREAM_FAILED = TaskInstanceState.UPSTREAM_FAILED
-    SKIPPED = TaskInstanceState.SKIPPED
-    DEFERRED = TaskInstanceState.DEFERRED
+    REMOVED = "removed"
+    SCHEDULED = "scheduled"
 
-    task_states: tuple[TaskInstanceState | None, ...] = (None,) + tuple(TaskInstanceState)
+    # set by the executor (t.b.d.)
+    # LAUNCHED = "launched"
 
-    dag_states: tuple[DagRunState, ...] = (
-        DagRunState.QUEUED,
-        DagRunState.SUCCESS,
-        DagRunState.RUNNING,
-        DagRunState.FAILED,
+    # set by a task
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCESS = "success"
+    SHUTDOWN = "shutdown"  # External request to shut down
+    FAILED = "failed"
+    UP_FOR_RETRY = "up_for_retry"
+    UPSTREAM_FAILED = "upstream_failed"
+    SKIPPED = "skipped"
+
+    task_states = (
+        SUCCESS,
+        RUNNING,
+        FAILED,
+        UPSTREAM_FAILED,
+        SKIPPED,
+        UP_FOR_RETRY,
+        QUEUED,
+        NONE,
+        SCHEDULED,
     )
 
-    state_color: dict[TaskInstanceState | None, str] = {
-        None: "lightblue",
-        TaskInstanceState.QUEUED: "gray",
-        TaskInstanceState.RUNNING: "lime",
-        TaskInstanceState.SUCCESS: "green",
-        TaskInstanceState.SHUTDOWN: "blue",
-        TaskInstanceState.RESTARTING: "violet",
-        TaskInstanceState.FAILED: "red",
-        TaskInstanceState.UP_FOR_RETRY: "gold",
-        TaskInstanceState.UP_FOR_RESCHEDULE: "turquoise",
-        TaskInstanceState.UPSTREAM_FAILED: "orange",
-        TaskInstanceState.SKIPPED: "hotpink",
-        TaskInstanceState.REMOVED: "lightgrey",
-        TaskInstanceState.SCHEDULED: "tan",
-        TaskInstanceState.DEFERRED: "mediumpurple",
+    dag_states = (
+        SUCCESS,
+        RUNNING,
+        FAILED,
+    )
+
+    state_color = {
+        QUEUED: 'gray',
+        RUNNING: 'lime',
+        SUCCESS: 'green',
+        SHUTDOWN: 'blue',
+        FAILED: 'red',
+        UP_FOR_RETRY: 'gold',
+        UPSTREAM_FAILED: 'orange',
+        SKIPPED: 'pink',
+        REMOVED: 'lightgrey',
+        SCHEDULED: 'tan',
+        NONE: 'lightblue',
     }
 
     @classmethod
     def color(cls, state):
-        """Returns color for a state."""
-        return cls.state_color.get(state, "white")
+        return cls.state_color.get(state, 'white')
 
     @classmethod
     def color_fg(cls, state):
-        """Black&white colors for a state."""
         color = cls.color(state)
-        if color in ["green", "red"]:
-            return "white"
-        return "black"
+        if color in ['green', 'red']:
+            return 'white'
+        return 'black'
 
-    finished: frozenset[TaskInstanceState] = frozenset(
-        [
-            TaskInstanceState.SUCCESS,
-            TaskInstanceState.FAILED,
-            TaskInstanceState.SKIPPED,
-            TaskInstanceState.UPSTREAM_FAILED,
-            TaskInstanceState.REMOVED,
+    @classmethod
+    def finished(cls):
+        """
+        A list of states indicating that a task started and completed a
+        run attempt. Note that the attempt could have resulted in failure or
+        have been interrupted; in any case, it is no longer running.
+        """
+        return [
+            cls.SUCCESS,
+            cls.FAILED,
+            cls.SKIPPED,
         ]
-    )
-    """
-    A list of states indicating a task has reached a terminal state (i.e. it has "finished") and needs no
-    further action.
 
-    Note that the attempt could have resulted in failure or have been
-    interrupted; or perhaps never run at all (skip, or upstream_failed) in any
-    case, it is no longer running.
-    """
-
-    unfinished: frozenset[TaskInstanceState | None] = frozenset(
-        [
-            None,
-            TaskInstanceState.SCHEDULED,
-            TaskInstanceState.QUEUED,
-            TaskInstanceState.RUNNING,
-            TaskInstanceState.SHUTDOWN,
-            TaskInstanceState.RESTARTING,
-            TaskInstanceState.UP_FOR_RETRY,
-            TaskInstanceState.UP_FOR_RESCHEDULE,
-            TaskInstanceState.DEFERRED,
+    @classmethod
+    def unfinished(cls):
+        """
+        A list of states indicating that a task either has not completed
+        a run or has not even started.
+        """
+        return [
+            cls.NONE,
+            cls.SCHEDULED,
+            cls.QUEUED,
+            cls.RUNNING,
+            cls.SHUTDOWN,
+            cls.UP_FOR_RETRY
         ]
-    )
-    """
-    A list of states indicating that a task either has not completed
-    a run or has not even started.
-    """
-
-    failed_states: frozenset[TaskInstanceState] = frozenset(
-        [TaskInstanceState.FAILED, TaskInstanceState.UPSTREAM_FAILED]
-    )
-    """
-    A list of states indicating that a task or dag is a failed state.
-    """
-
-    success_states: frozenset[TaskInstanceState] = frozenset(
-        [TaskInstanceState.SUCCESS, TaskInstanceState.SKIPPED]
-    )
-    """
-    A list of states indicating that a task or dag is a success state.
-    """
-
-    terminating_states = frozenset([TaskInstanceState.SHUTDOWN, TaskInstanceState.RESTARTING])
-    """
-    A list of states indicating that a task has been terminated.
-    """

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,180 +16,108 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# fmt: off
-"""Operators."""
-from __future__ import annotations
 
-from airflow.utils.deprecation_tools import add_deprecated_classes
+import sys
+import os
+from airflow.models import BaseOperator
 
-__deprecated_classes = {
-    'bash_operator': {
-        'BashOperator': 'airflow.operators.bash.BashOperator',
-    },
-    'branch_operator': {
-        'BaseBranchOperator': 'airflow.operators.branch.BaseBranchOperator',
-    },
-    'check_operator': {
-        'SQLCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLCheckOperator',
-        'SQLIntervalCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLIntervalCheckOperator',
-        'SQLThresholdCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLThresholdCheckOperator',
-        'SQLValueCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLValueCheckOperator',
-        'CheckOperator': 'airflow.providers.common.sql.operators.sql.SQLCheckOperator',
-        'IntervalCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLIntervalCheckOperator',
-        'ThresholdCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLThresholdCheckOperator',
-        'ValueCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLValueCheckOperator',
-    },
-    'dagrun_operator': {
-        'TriggerDagRunLink': 'airflow.operators.trigger_dagrun.TriggerDagRunLink',
-        'TriggerDagRunOperator': 'airflow.operators.trigger_dagrun.TriggerDagRunOperator',
-    },
-    'docker_operator': {
-        'DockerOperator': 'airflow.providers.docker.operators.docker.DockerOperator',
-    },
-    'druid_check_operator': {
-        'DruidCheckOperator': 'airflow.providers.apache.druid.operators.druid_check.DruidCheckOperator',
-    },
-    'dummy': {
-        'EmptyOperator': 'airflow.operators.empty.EmptyOperator',
-        'DummyOperator': 'airflow.operators.empty.EmptyOperator',
-    },
-    'dummy_operator': {
-        'EmptyOperator': 'airflow.operators.empty.EmptyOperator',
-        'DummyOperator': 'airflow.operators.empty.EmptyOperator',
-    },
-    'email_operator': {
-        'EmailOperator': 'airflow.operators.email.EmailOperator',
-    },
-    'gcs_to_s3': {
-        'GCSToS3Operator': 'airflow.providers.amazon.aws.transfers.gcs_to_s3.GCSToS3Operator',
-    },
-    'google_api_to_s3_transfer': {
-        'GoogleApiToS3Operator': (
-            'airflow.providers.amazon.aws.transfers.google_api_to_s3.GoogleApiToS3Operator'
-        ),
-        'GoogleApiToS3Transfer': (
-            'airflow.providers.amazon.aws.transfers.google_api_to_s3.GoogleApiToS3Operator'
-        ),
-    },
-    'hive_operator': {
-        'HiveOperator': 'airflow.providers.apache.hive.operators.hive.HiveOperator',
-    },
-    'hive_stats_operator': {
-        'HiveStatsCollectionOperator': (
-            'airflow.providers.apache.hive.operators.hive_stats.HiveStatsCollectionOperator'
-        ),
-    },
-    'hive_to_druid': {
-        'HiveToDruidOperator': 'airflow.providers.apache.druid.transfers.hive_to_druid.HiveToDruidOperator',
-        'HiveToDruidTransfer': 'airflow.providers.apache.druid.transfers.hive_to_druid.HiveToDruidOperator',
-    },
-    'hive_to_mysql': {
-        'HiveToMySqlOperator': 'airflow.providers.apache.hive.transfers.hive_to_mysql.HiveToMySqlOperator',
-        'HiveToMySqlTransfer': 'airflow.providers.apache.hive.transfers.hive_to_mysql.HiveToMySqlOperator',
-    },
-    'hive_to_samba_operator': {
-        'HiveToSambaOperator': 'airflow.providers.apache.hive.transfers.hive_to_samba.HiveToSambaOperator',
-    },
-    'http_operator': {
-        'SimpleHttpOperator': 'airflow.providers.http.operators.http.SimpleHttpOperator',
-    },
-    'jdbc_operator': {
-        'JdbcOperator': 'airflow.providers.jdbc.operators.jdbc.JdbcOperator',
-    },
-    'latest_only_operator': {
-        'LatestOnlyOperator': 'airflow.operators.latest_only.LatestOnlyOperator',
-    },
-    'mssql_operator': {
-        'MsSqlOperator': 'airflow.providers.microsoft.mssql.operators.mssql.MsSqlOperator',
-    },
-    'mssql_to_hive': {
-        'MsSqlToHiveOperator': 'airflow.providers.apache.hive.transfers.mssql_to_hive.MsSqlToHiveOperator',
-        'MsSqlToHiveTransfer': 'airflow.providers.apache.hive.transfers.mssql_to_hive.MsSqlToHiveOperator',
-    },
-    'mysql_operator': {
-        'MySqlOperator': 'airflow.providers.mysql.operators.mysql.MySqlOperator',
-    },
-    'mysql_to_hive': {
-        'MySqlToHiveOperator': 'airflow.providers.apache.hive.transfers.mysql_to_hive.MySqlToHiveOperator',
-        'MySqlToHiveTransfer': 'airflow.providers.apache.hive.transfers.mysql_to_hive.MySqlToHiveOperator',
-    },
-    'oracle_operator': {
-        'OracleOperator': 'airflow.providers.oracle.operators.oracle.OracleOperator',
-    },
-    'papermill_operator': {
-        'PapermillOperator': 'airflow.providers.papermill.operators.papermill.PapermillOperator',
-    },
-    'pig_operator': {
-        'PigOperator': 'airflow.providers.apache.pig.operators.pig.PigOperator',
-    },
-    'postgres_operator': {
-        'Mapping': 'airflow.providers.postgres.operators.postgres.Mapping',
-        'PostgresOperator': 'airflow.providers.postgres.operators.postgres.PostgresOperator',
-    },
-    'presto_check_operator': {
-        'SQLCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLCheckOperator',
-        'SQLIntervalCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLIntervalCheckOperator',
-        'SQLValueCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLValueCheckOperator',
-        'PrestoCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLCheckOperator',
-        'PrestoIntervalCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLIntervalCheckOperator',
-        'PrestoValueCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLValueCheckOperator',
-    },
-    'presto_to_mysql': {
-        'PrestoToMySqlOperator': 'airflow.providers.mysql.transfers.presto_to_mysql.PrestoToMySqlOperator',
-        'PrestoToMySqlTransfer': 'airflow.providers.mysql.transfers.presto_to_mysql.PrestoToMySqlOperator',
-    },
-    'python_operator': {
-        'BranchPythonOperator': 'airflow.operators.python.BranchPythonOperator',
-        'PythonOperator': 'airflow.operators.python.PythonOperator',
-        'PythonVirtualenvOperator': 'airflow.operators.python.PythonVirtualenvOperator',
-        'ShortCircuitOperator': 'airflow.operators.python.ShortCircuitOperator',
-    },
-    'redshift_to_s3_operator': {
-        'RedshiftToS3Operator': 'airflow.providers.amazon.aws.transfers.redshift_to_s3.RedshiftToS3Operator',
-        'RedshiftToS3Transfer': 'airflow.providers.amazon.aws.transfers.redshift_to_s3.RedshiftToS3Operator',
-    },
-    's3_file_transform_operator': {
-        'S3FileTransformOperator': (
-            'airflow.providers.amazon.aws.operators.s3_file_transform.S3FileTransformOperator'
-        ),
-    },
-    's3_to_hive_operator': {
-        'S3ToHiveOperator': 'airflow.providers.apache.hive.transfers.s3_to_hive.S3ToHiveOperator',
-        'S3ToHiveTransfer': 'airflow.providers.apache.hive.transfers.s3_to_hive.S3ToHiveOperator',
-    },
-    's3_to_redshift_operator': {
-        'S3ToRedshiftOperator': 'airflow.providers.amazon.aws.transfers.s3_to_redshift.S3ToRedshiftOperator',
-        'S3ToRedshiftTransfer': 'airflow.providers.amazon.aws.transfers.s3_to_redshift.S3ToRedshiftOperator',
-    },
-    'slack_operator': {
-        'SlackAPIOperator': 'airflow.providers.slack.operators.slack.SlackAPIOperator',
-        'SlackAPIPostOperator': 'airflow.providers.slack.operators.slack.SlackAPIPostOperator',
-    },
-    'sql': {
-        'BaseSQLOperator': 'airflow.providers.common.sql.operators.sql.BaseSQLOperator',
-        'BranchSQLOperator': 'airflow.providers.common.sql.operators.sql.BranchSQLOperator',
-        'SQLCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLCheckOperator',
-        'SQLColumnCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLColumnCheckOperator',
-        'SQLIntervalCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLIntervalCheckOperator',
-        'SQLTableCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLTableCheckOperator',
-        'SQLThresholdCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLThresholdCheckOperator',
-        'SQLValueCheckOperator': 'airflow.providers.common.sql.operators.sql.SQLValueCheckOperator',
-        '_convert_to_float_if_possible': (
-            'airflow.providers.common.sql.operators.sql._convert_to_float_if_possible'
-        ),
-        'parse_boolean': 'airflow.providers.common.sql.operators.sql.parse_boolean',
-    },
-    'sql_branch_operator': {
-        'BranchSQLOperator': 'airflow.providers.common.sql.operators.sql.BranchSQLOperator',
-        'BranchSqlOperator': 'airflow.providers.common.sql.operators.sql.BranchSQLOperator',
-    },
-    'sqlite_operator': {
-        'SqliteOperator': 'airflow.providers.sqlite.operators.sqlite.SqliteOperator',
-    },
-    'subdag_operator': {
-        'SkippedStatePropagationOptions': 'airflow.operators.subdag.SkippedStatePropagationOptions',
-        'SubDagOperator': 'airflow.operators.subdag.SubDagOperator',
-    },
+# ------------------------------------------------------------------------
+#
+# #TODO #FIXME Airflow 2.0
+#
+# Old import machinary below.
+#
+# This is deprecated but should be kept until Airflow 2.0
+# for compatibility.
+#
+# ------------------------------------------------------------------------
+
+# Imports operators dynamically while keeping the package API clean,
+# abstracting the underlying modules
+
+_operators = {
+    'bash_operator': ['BashOperator'],
+    'check_operator': [
+        'CheckOperator',
+        'ValueCheckOperator',
+        'IntervalCheckOperator',
+    ],
+    'python_operator': [
+        'PythonOperator',
+        'BranchPythonOperator',
+        'ShortCircuitOperator',
+    ],
+    'hive_operator': ['HiveOperator'],
+    'pig_operator': ['PigOperator'],
+    'presto_check_operator': [
+        'PrestoCheckOperator',
+        'PrestoValueCheckOperator',
+        'PrestoIntervalCheckOperator',
+    ],
+    'sensors': [
+        'BaseSensorOperator',
+        'ExternalTaskSensor',
+        'HdfsSensor',
+        'HivePartitionSensor',
+        'HttpSensor',
+        'MetastorePartitionSensor',
+        'NamedHivePartitionSensor',
+        'S3KeySensor',
+        'S3PrefixSensor',
+        'SqlSensor',
+        'TimeDeltaSensor',
+        'TimeSensor',
+        'WebHdfsSensor',
+    ],
+    'dagrun_operator': ['TriggerDagRunOperator'],
+    'dummy_operator': ['DummyOperator'],
+    'email_operator': ['EmailOperator'],
+    'hive_to_samba_operator': ['Hive2SambaOperator'],
+    'latest_only_operator': ['LatestOnlyOperator'],
+    'mysql_operator': ['MySqlOperator'],
+    'sqlite_operator': ['SqliteOperator'],
+    'mysql_to_hive': ['MySqlToHiveTransfer'],
+    'postgres_operator': ['PostgresOperator'],
+    'subdag_operator': ['SubDagOperator'],
+    'hive_stats_operator': ['HiveStatsCollectionOperator'],
+    's3_to_hive_operator': ['S3ToHiveTransfer'],
+    'hive_to_mysql': ['HiveToMySqlTransfer'],
+    'presto_to_mysql': ['PrestoToMySqlTransfer'],
+    's3_file_transform_operator': ['S3FileTransformOperator'],
+    'http_operator': ['SimpleHttpOperator'],
+    'hive_to_druid': ['HiveToDruidTransfer'],
+    'jdbc_operator': ['JdbcOperator'],
+    'mssql_operator': ['MsSqlOperator'],
+    'mssql_to_hive': ['MsSqlToHiveTransfer'],
+    'slack_operator': ['SlackAPIOperator', 'SlackAPIPostOperator'],
+    'generic_transfer': ['GenericTransfer'],
+    'oracle_operator': ['OracleOperator']
 }
 
-add_deprecated_classes(__deprecated_classes, __name__)
+if not os.environ.get('AIRFLOW_USE_NEW_IMPORTS', False):
+    from airflow.utils.helpers import AirflowImporter
+    airflow_importer = AirflowImporter(sys.modules[__name__], _operators)
+
+
+def _integrate_plugins():
+    """Integrate plugins to the context"""
+    from airflow.plugins_manager import operators_modules
+    for operators_module in operators_modules:
+        sys.modules[operators_module.__name__] = operators_module
+        globals()[operators_module._name] = operators_module
+
+        ##########################################################
+        # TODO FIXME Remove in Airflow 2.0
+
+        if not os.environ.get('AIRFLOW_USE_NEW_IMPORTS', False):
+            from zope.deprecation import deprecated as _deprecated
+            for _operator in operators_module._objects:
+                operator_name = _operator.__name__
+                globals()[operator_name] = _operator
+                _deprecated(
+                    operator_name,
+                    "Importing plugin operator '{i}' directly from "
+                    "'airflow.operators' has been deprecated. Please "
+                    "import from 'airflow.operators.[plugin_module]' "
+                    "instead. Support for direct imports will be dropped "
+                    "entirely in Airflow 2.0.".format(i=operator_name))

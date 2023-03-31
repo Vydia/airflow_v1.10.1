@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,362 +16,218 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
 
-import re
-from datetime import datetime
-from urllib.parse import parse_qs
+import mock
+import unittest
+from xml.dom import minidom
 
-from bs4 import BeautifulSoup
+from airflow.www import app as application
 
 from airflow.www import utils
-from airflow.www.utils import wrapped_markdown
 
 
-class TestUtils:
-    def check_generate_pages_html(
-        self,
-        current_page,
-        total_pages,
-        window=7,
-        check_middle=False,
-        sorting_key=None,
-        sorting_direction=None,
-    ):
+class UtilsTest(unittest.TestCase):
+
+    def setUp(self):
+        super(UtilsTest, self).setUp()
+
+    def test_empty_variable_should_not_be_hidden(self):
+        self.assertFalse(utils.should_hide_value_for_key(""))
+        self.assertFalse(utils.should_hide_value_for_key(None))
+
+    def test_normal_variable_should_not_be_hidden(self):
+        self.assertFalse(utils.should_hide_value_for_key("key"))
+
+    def test_sensitive_variable_should_be_hidden(self):
+        self.assertTrue(utils.should_hide_value_for_key("google_api_key"))
+
+    def test_sensitive_variable_should_be_hidden_ic(self):
+        self.assertTrue(utils.should_hide_value_for_key("GOOGLE_API_KEY"))
+
+    def check_generate_pages_html(self, current_page, total_pages,
+                                  window=7, check_middle=False):
         extra_links = 4  # first, prev, next, last
-        search = "'>\"/><img src=x onerror=alert(1)>"
-        if sorting_key and sorting_direction:
-            html_str = utils.generate_pages(
-                current_page,
-                total_pages,
-                search=search,
-                sorting_key=sorting_key,
-                sorting_direction=sorting_direction,
-            )
-        else:
-            html_str = utils.generate_pages(current_page, total_pages, search=search)
+        html_str = utils.generate_pages(current_page, total_pages)
 
-        assert search not in html_str, "The raw search string shouldn't appear in the output"
-        assert "search=%27%3E%22%2F%3E%3Cimg+src%3Dx+onerror%3Dalert%281%29%3E" in html_str
+        # dom parser has issues with special &laquo; and &raquo;
+        html_str = html_str.replace('&laquo;', '')
+        html_str = html_str.replace('&raquo;', '')
+        dom = minidom.parseString(html_str)
+        self.assertIsNotNone(dom)
 
-        assert callable(html_str.__html__), "Should return something that is HTML-escaping aware"
+        ulist = dom.getElementsByTagName('ul')[0]
+        ulist_items = ulist.getElementsByTagName('li')
+        self.assertEqual(min(window, total_pages) + extra_links, len(ulist_items))
 
-        dom = BeautifulSoup(html_str, "html.parser")
-        assert dom is not None
-
-        ulist = dom.ul
-        ulist_items = ulist.find_all("li")
-        assert min(window, total_pages) + extra_links == len(ulist_items)
+        def get_text(nodelist):
+            rc = []
+            for node in nodelist:
+                if node.nodeType == node.TEXT_NODE:
+                    rc.append(node.data)
+            return ''.join(rc)
 
         page_items = ulist_items[2:-2]
         mid = int(len(page_items) / 2)
-        all_nodes = []
-        pages = []
-
-        if sorting_key and sorting_direction:
-            last_page = total_pages - 1
-
-            if current_page <= mid or total_pages < window:
-                pages = list(range(0, min(total_pages, window)))
-            elif mid < current_page < last_page - mid:
-                pages = list(range(current_page - mid, current_page + mid + 1))
-            else:
-                pages = list(range(total_pages - window, last_page + 1))
-
-            pages.append(last_page + 1)
-            pages.sort(reverse=True if sorting_direction == "desc" else False)
-
         for i, item in enumerate(page_items):
-            a_node = item.a
-            href_link = a_node["href"]
-            node_text = a_node.string
-            all_nodes.append(node_text)
+            a_node = item.getElementsByTagName('a')[0]
+            href_link = a_node.getAttribute('href')
+            node_text = get_text(a_node.childNodes)
             if node_text == str(current_page + 1):
                 if check_middle:
-                    assert mid == i
-                assert "javascript:void(0)" == href_link
-                assert "active" in item["class"]
+                    self.assertEqual(mid, i)
+                self.assertEqual('javascript:void(0)', a_node.getAttribute('href'))
+                self.assertIn('active', item.getAttribute('class'))
             else:
-                assert re.search(r"^\?", href_link), "Link is page-relative"
-                query = parse_qs(href_link[1:])
-                assert query["page"] == [str(int(node_text) - 1)]
-                assert query["search"] == [search]
-
-        if sorting_key and sorting_direction:
-            if pages[0] == 0:
-                pages = pages[1:]
-                pages = list(map(lambda x: str(x), pages))
-
-            assert pages == all_nodes
+                link_str = '?page=' + str(int(node_text) - 1)
+                self.assertEqual(link_str, href_link)
 
     def test_generate_pager_current_start(self):
-        self.check_generate_pages_html(current_page=0, total_pages=6)
+        self.check_generate_pages_html(current_page=0,
+                                       total_pages=6)
 
     def test_generate_pager_current_middle(self):
-        self.check_generate_pages_html(current_page=10, total_pages=20, check_middle=True)
+        self.check_generate_pages_html(current_page=10,
+                                       total_pages=20,
+                                       check_middle=True)
 
     def test_generate_pager_current_end(self):
-        self.check_generate_pages_html(current_page=38, total_pages=39)
-
-    def test_generate_pager_current_start_with_sorting(self):
-        self.check_generate_pages_html(
-            current_page=0, total_pages=4, sorting_key="dag_id", sorting_direction="asc"
-        )
+        self.check_generate_pages_html(current_page=38,
+                                       total_pages=39)
 
     def test_params_no_values(self):
         """Should return an empty string if no params are passed"""
-        assert "" == utils.get_params()
+        self.assertEquals('', utils.get_params())
 
     def test_params_search(self):
-        assert "search=bash_" == utils.get_params(search="bash_")
+        self.assertEqual('search=bash_',
+                         utils.get_params(search='bash_'))
 
-    def test_params_none_and_zero(self):
-        query_str = utils.get_params(a=0, b=None, c="true")
-        # The order won't be consistent, but that doesn't affect behaviour of a browser
-        pairs = list(sorted(query_str.split("&")))
-        assert ["a=0", "c=true"] == pairs
+    def test_params_showPaused_true(self):
+        """Should detect True as default for showPaused"""
+        self.assertEqual('',
+                         utils.get_params(showPaused=True))
+
+    def test_params_showPaused_false(self):
+        self.assertEqual('showPaused=False',
+                         utils.get_params(showPaused=False))
 
     def test_params_all(self):
-        query = utils.get_params(tags=["tag1", "tag2"], status="active", page=3, search="bash_")
-        assert {
-            "tags": ["tag1", "tag2"],
-            "page": ["3"],
-            "search": ["bash_"],
-            "status": ["active"],
-        } == parse_qs(query)
+        """Should return params string ordered by param key"""
+        self.assertEqual('page=3&search=bash_&showPaused=False',
+                         utils.get_params(showPaused=False, page=3, search='bash_'))
 
-    def test_params_escape(self):
-        assert "search=%27%3E%22%2F%3E%3Cimg+src%3Dx+onerror%3Dalert%281%29%3E" == utils.get_params(
-            search="'>\"/><img src=x onerror=alert(1)>"
-        )
+    # flask_login is loaded by calling flask_login.utils._get_user.
+    @mock.patch("flask_login.utils._get_user")
+    @mock.patch("airflow.settings.Session")
+    def test_action_logging_with_login_user(self, mocked_session, mocked_get_user):
+        fake_username = 'someone'
+        mocked_current_user = mock.MagicMock()
+        mocked_get_user.return_value = mocked_current_user
+        mocked_current_user.user.username = fake_username
+        mocked_session_instance = mock.MagicMock()
+        mocked_session.return_value = mocked_session_instance
 
-    def test_state_token(self):
-        # It's shouldn't possible to set these odd values anymore, but lets
-        # ensure they are escaped!
-        html = str(utils.state_token("<script>alert(1)</script>"))
+        app = application.create_app(testing=True)
+        # Patching here to avoid errors in applicant.create_app
+        with mock.patch("airflow.models.Log") as mocked_log:
+            with app.test_request_context():
+                @utils.action_logging
+                def some_func():
+                    pass
 
-        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
-        assert "<script>alert(1)</script>" not in html
+                some_func()
+                mocked_log.assert_called_once()
+                (args, kwargs) = mocked_log.call_args_list[0]
+                self.assertEqual('some_func', kwargs['event'])
+                self.assertEqual(fake_username, kwargs['owner'])
+                mocked_session_instance.add.assert_called_once()
 
-    def test_task_instance_link(self):
+    @mock.patch("flask_login.utils._get_user")
+    @mock.patch("airflow.settings.Session")
+    def test_action_logging_with_invalid_user(self, mocked_session, mocked_get_user):
+        anonymous_username = 'anonymous'
 
-        from airflow.www.app import cached_app
+        # When the user returned by flask login_manager._load_user
+        # is invalid.
+        mocked_current_user = mock.MagicMock()
+        mocked_get_user.return_value = mocked_current_user
+        mocked_current_user.user = None
+        mocked_session_instance = mock.MagicMock()
+        mocked_session.return_value = mocked_session_instance
 
-        with cached_app(testing=True).test_request_context():
-            html = str(
-                utils.task_instance_link(
-                    {"dag_id": "<a&1>", "task_id": "<b2>", "execution_date": datetime.now()}
-                )
-            )
+        app = application.create_app(testing=True)
+        # Patching here to avoid errors in applicant.create_app
+        with mock.patch("airflow.models.Log") as mocked_log:
+            with app.test_request_context():
+                @utils.action_logging
+                def some_func():
+                    pass
 
-        assert "%3Ca%261%3E" in html
-        assert "%3Cb2%3E" in html
-        assert "<a&1>" not in html
-        assert "<b2>" not in html
+                some_func()
+                mocked_log.assert_called_once()
+                (args, kwargs) = mocked_log.call_args_list[0]
+                self.assertEqual('some_func', kwargs['event'])
+                self.assertEqual(anonymous_username, kwargs['owner'])
+                mocked_session_instance.add.assert_called_once()
 
-    def test_dag_link(self):
-        from airflow.www.app import cached_app
+    # flask_login.current_user would be AnonymousUserMixin
+    # when there's no user_id in the flask session.
+    @mock.patch("airflow.settings.Session")
+    def test_action_logging_with_anonymous_user(self, mocked_session):
+        anonymous_username = 'anonymous'
 
-        with cached_app(testing=True).test_request_context():
-            html = str(utils.dag_link({"dag_id": "<a&1>", "execution_date": datetime.now()}))
+        mocked_session_instance = mock.MagicMock()
+        mocked_session.return_value = mocked_session_instance
 
-        assert "%3Ca%261%3E" in html
-        assert "<a&1>" not in html
+        app = application.create_app(testing=True)
+        # Patching here to avoid errors in applicant.create_app
+        with mock.patch("airflow.models.Log") as mocked_log:
+            with app.test_request_context():
+                @utils.action_logging
+                def some_func():
+                    pass
 
-    def test_dag_link_when_dag_is_none(self):
-        """Test that when there is no dag_id, dag_link does not contain hyperlink"""
-        from airflow.www.app import cached_app
+                some_func()
+                mocked_log.assert_called_once()
+                (args, kwargs) = mocked_log.call_args_list[0]
+                self.assertEqual('some_func', kwargs['event'])
+                self.assertEqual(anonymous_username, kwargs['owner'])
+                mocked_session_instance.add.assert_called_once()
 
-        with cached_app(testing=True).test_request_context():
-            html = str(utils.dag_link({}))
+    def test_open_maybe_zipped_normal_file(self):
+        with mock.patch(
+                'io.open', mock.mock_open(read_data="data")) as mock_file:
+            utils.open_maybe_zipped('/path/to/some/file.txt')
+            mock_file.assert_called_with('/path/to/some/file.txt', mode='r')
 
-        assert "None" in html
-        assert "<a href=" not in html
+    def test_open_maybe_zipped_normal_file_with_zip_in_name(self):
+        path = '/path/to/fakearchive.zip.other/file.txt'
+        with mock.patch(
+                'io.open', mock.mock_open(read_data="data")) as mock_file:
+            utils.open_maybe_zipped(path)
+            mock_file.assert_called_with(path, mode='r')
 
-    def test_dag_run_link(self):
-        from airflow.www.app import cached_app
+    @mock.patch("zipfile.is_zipfile")
+    @mock.patch("zipfile.ZipFile")
+    def test_open_maybe_zipped_archive(self, mocked_ZipFile, mocked_is_zipfile):
+        mocked_is_zipfile.return_value = True
+        instance = mocked_ZipFile.return_value
+        instance.open.return_value = mock.mock_open(read_data="data")
 
-        with cached_app(testing=True).test_request_context():
-            html = str(
-                utils.dag_run_link({"dag_id": "<a&1>", "run_id": "<b2>", "execution_date": datetime.now()})
-            )
+        utils.open_maybe_zipped('/path/to/archive.zip/deep/path/to/file.txt')
 
-        assert "%3Ca%261%3E" in html
-        assert "%3Cb2%3E" in html
-        assert "<a&1>" not in html
-        assert "<b2>" not in html
+        mocked_is_zipfile.assert_called_once()
+        (args, kwargs) = mocked_is_zipfile.call_args_list[0]
+        self.assertEqual('/path/to/archive.zip', args[0])
 
+        mocked_ZipFile.assert_called_once()
+        (args, kwargs) = mocked_ZipFile.call_args_list[0]
+        self.assertEqual('/path/to/archive.zip', args[0])
 
-class TestAttrRenderer:
-    def setup_method(self):
-        self.attr_renderer = utils.get_attr_renderer()
-
-    def test_python_callable(self):
-        def example_callable(unused_self):
-            print("example")
-
-        rendered = self.attr_renderer["python_callable"](example_callable)
-        assert "&quot;example&quot;" in rendered
-
-    def test_python_callable_none(self):
-        rendered = self.attr_renderer["python_callable"](None)
-        assert "" == rendered
-
-    def test_markdown(self):
-        markdown = "* foo\n* bar"
-        rendered = self.attr_renderer["doc_md"](markdown)
-        assert "<li>foo</li>" in rendered
-        assert "<li>bar</li>" in rendered
-
-    def test_markdown_none(self):
-        rendered = self.attr_renderer["doc_md"](None)
-        assert rendered is None
+        instance.open.assert_called_once()
+        (args, kwargs) = instance.open.call_args_list[0]
+        self.assertEqual('deep/path/to/file.txt', args[0])
 
 
-class TestWrappedMarkdown:
-    def test_wrapped_markdown_with_docstring_curly_braces(self):
-        rendered = wrapped_markdown("{braces}", css_class="a_class")
-        assert (
-            """<div class="a_class" ><p>{braces}</p>
-</div>"""
-            == rendered
-        )
-
-    def test_wrapped_markdown_with_some_markdown(self):
-        rendered = wrapped_markdown(
-            """*italic*
-        **bold**
-        """,
-            css_class="a_class",
-        )
-
-        assert (
-            """<div class="a_class" ><p><em>italic</em>
-<strong>bold</strong></p>
-</div>"""
-            == rendered
-        )
-
-    def test_wrapped_markdown_with_table(self):
-        rendered = wrapped_markdown(
-            """
-| Job | Duration |
-| ----------- | ----------- |
-| ETL | 14m |
-"""
-        )
-
-        assert (
-            """<div class="rich_doc" ><table>
-<thead>
-<tr>
-<th>Job</th>
-<th>Duration</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>ETL</td>
-<td>14m</td>
-</tr>
-</tbody>
-</table>
-</div>"""
-            == rendered
-        )
-
-    def test_wrapped_markdown_with_indented_lines(self):
-        rendered = wrapped_markdown(
-            """
-                # header
-                1st line
-                2nd line
-            """
-        )
-
-        assert (
-            """<div class="rich_doc" ><h1>header</h1>\n<p>1st line\n2nd line</p>
-</div>"""
-            == rendered
-        )
-
-    def test_wrapped_markdown_with_raw_code_block(self):
-        rendered = wrapped_markdown(
-            """\
-            # Markdown code block
-
-            Inline `code` works well.
-
-                Code block
-                does not
-                respect
-                newlines
-
-            """
-        )
-
-        assert (
-            """<div class="rich_doc" ><h1>Markdown code block</h1>
-<p>Inline <code>code</code> works well.</p>
-<pre><code>Code block\ndoes not\nrespect\nnewlines\n</code></pre>
-</div>"""
-            == rendered
-        )
-
-    def test_wrapped_markdown_with_nested_list(self):
-        rendered = wrapped_markdown(
-            """
-            ### Docstring with a code block
-
-            - And
-                - A nested list
-            """
-        )
-
-        assert (
-            """<div class="rich_doc" ><h3>Docstring with a code block</h3>
-<ul>
-<li>And
-<ul>
-<li>A nested list</li>
-</ul>
-</li>
-</ul>
-</div>"""
-            == rendered
-        )
-
-    def test_wrapped_markdown_with_collapsible_section(self):
-        rendered = wrapped_markdown(
-            """
-# A collapsible section with markdown
-<details>
-  <summary>Click to expand!</summary>
-
-  ## Heading
-  1. A numbered
-  2. list
-     * With some
-     * Sub bullets
-</details>
-            """
-        )
-
-        assert (
-            """<div class="rich_doc" ><h1>A collapsible section with markdown</h1>
-<details>
-  <summary>Click to expand!</summary>
-<h2>Heading</h2>
-<ol>
-<li>A numbered</li>
-<li>list
-<ul>
-<li>With some</li>
-<li>Sub bullets</li>
-</ul>
-</li>
-</ol>
-</details>
-</div>"""
-            == rendered
-        )
+if __name__ == '__main__':
+    unittest.main()

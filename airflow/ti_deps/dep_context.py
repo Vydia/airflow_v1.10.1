@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,32 +16,27 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-import attr
-from sqlalchemy.orm.session import Session
-
+from airflow.ti_deps.deps.dag_ti_slots_available_dep import DagTISlotsAvailableDep
+from airflow.ti_deps.deps.dag_unpaused_dep import DagUnpausedDep
+from airflow.ti_deps.deps.dagrun_exists_dep import DagrunRunningDep
+from airflow.ti_deps.deps.exec_date_after_start_date_dep import ExecDateAfterStartDateDep
+from airflow.ti_deps.deps.not_running_dep import NotRunningDep
+from airflow.ti_deps.deps.not_skipped_dep import NotSkippedDep
+from airflow.ti_deps.deps.runnable_exec_date_dep import RunnableExecDateDep
+from airflow.ti_deps.deps.valid_state_dep import ValidStateDep
+from airflow.ti_deps.deps.task_concurrency_dep import TaskConcurrencyDep
 from airflow.utils.state import State
 
-if TYPE_CHECKING:
-    from airflow.models.dagrun import DagRun
-    from airflow.models.taskinstance import TaskInstance
 
-
-@attr.define
-class DepContext:
+class DepContext(object):
     """
-    A base class for dependency contexts.
-
-    Specifies which dependencies should be evaluated in the context for a task
-    instance to satisfy the requirements of the context. Also stores state
-    related to the context that can be used by dependency classes.
+    A base class for contexts that specifies which dependencies should be evaluated in
+    the context for a task instance to satisfy the requirements of the context. Also
+    stores state related to the context that can be used by dependendency classes.
 
     For example there could be a SomeRunContext that subclasses this class which has
     dependencies for:
-
     - Making sure there are slots available on the infrastructure to run the task instance
     - A task-instance's task-specific dependencies are met (e.g. the previous task
       instance completed successfully)
@@ -48,51 +44,81 @@ class DepContext:
 
     :param deps: The context-specific dependencies that need to be evaluated for a
         task instance to run in this execution context.
+    :type deps: set(BaseTIDep)
     :param flag_upstream_failed: This is a hack to generate the upstream_failed state
         creation while checking to see whether the task instance is runnable. It was the
         shortest path to add the feature. This is bad since this class should be pure (no
         side effects).
-    :param ignore_all_deps: Whether or not the context should ignore all ignorable
+    :type flag_upstream_failed: boolean
+    :param ignore_all_deps: Whether or not the context should ignore all ignoreable
         dependencies. Overrides the other ignore_* parameters
+    :type ignore_all_deps: boolean
     :param ignore_depends_on_past: Ignore depends_on_past parameter of DAGs (e.g. for
         Backfills)
-    :param wait_for_past_depends_before_skipping: Wait for past depends before marking the ti as skipped
+    :type ignore_depends_on_past: boolean
     :param ignore_in_retry_period: Ignore the retry period for task instances
-    :param ignore_in_reschedule_period: Ignore the reschedule period for task instances
-    :param ignore_unmapped_tasks: Ignore errors about mapped tasks not yet being expanded
+    :type ignore_in_retry_period: boolean
     :param ignore_task_deps: Ignore task-specific dependencies such as depends_on_past and
         trigger rule
+    :type ignore_task_deps: boolean
     :param ignore_ti_state: Ignore the task instance's previous failure/success
-    :param finished_tis: A list of all the finished task instances of this run
+    :type ignore_ti_state: boolean
     """
+    def __init__(
+            self,
+            deps=None,
+            flag_upstream_failed=False,
+            ignore_all_deps=False,
+            ignore_depends_on_past=False,
+            ignore_in_retry_period=False,
+            ignore_task_deps=False,
+            ignore_ti_state=False):
+        self.deps = deps or set()
+        self.flag_upstream_failed = flag_upstream_failed
+        self.ignore_all_deps = ignore_all_deps
+        self.ignore_depends_on_past = ignore_depends_on_past
+        self.ignore_in_retry_period = ignore_in_retry_period
+        self.ignore_task_deps = ignore_task_deps
+        self.ignore_ti_state = ignore_ti_state
 
-    deps: set = attr.ib(factory=set)
-    flag_upstream_failed: bool = False
-    ignore_all_deps: bool = False
-    ignore_depends_on_past: bool = False
-    wait_for_past_depends_before_skipping: bool = False
-    ignore_in_retry_period: bool = False
-    ignore_in_reschedule_period: bool = False
-    ignore_task_deps: bool = False
-    ignore_ti_state: bool = False
-    ignore_unmapped_tasks: bool = False
-    finished_tis: list[TaskInstance] | None = None
-    description: str | None = None
 
-    have_changed_ti_states: bool = False
-    """Have any of the TIs state's been changed as a result of evaluating dependencies"""
+# In order to be able to get queued a task must have one of these states
+QUEUEABLE_STATES = {
+    State.FAILED,
+    State.NONE,
+    State.QUEUED,
+    State.SCHEDULED,
+    State.SKIPPED,
+    State.UPSTREAM_FAILED,
+    State.UP_FOR_RETRY,
+}
 
-    def ensure_finished_tis(self, dag_run: DagRun, session: Session) -> list[TaskInstance]:
-        """
-        This method makes sure finished_tis is populated if it's currently None.
-        This is for the strange feature of running tasks without dag_run.
+# Context to get the dependencies that need to be met in order for a task instance to
+# be backfilled.
+QUEUE_DEPS = {
+    NotRunningDep(),
+    NotSkippedDep(),
+    RunnableExecDateDep(),
+    ValidStateDep(QUEUEABLE_STATES),
+}
 
-        :param dag_run: The DagRun for which to find finished tasks
-        :return: A list of all the finished tasks of this DAG and execution_date
-        """
-        if self.finished_tis is None:
-            finished_tis = dag_run.get_task_instances(state=State.finished, session=session)
-            self.finished_tis = finished_tis
-        else:
-            finished_tis = self.finished_tis
-        return finished_tis
+# Dependencies that need to be met for a given task instance to be able to get run by an
+# executor. This class just extends QueueContext by adding dependencies for resources.
+RUN_DEPS = QUEUE_DEPS | {
+    DagTISlotsAvailableDep(),
+    TaskConcurrencyDep(),
+}
+
+# TODO(aoen): SCHEDULER_DEPS is not coupled to actual execution in any way and
+# could easily be modified or removed from the scheduler causing this dependency to become
+# outdated and incorrect. This coupling should be created (e.g. via a dag_deps analog of
+# ti_deps that will be used in the scheduler code) to ensure that the logic here is
+# equivalent to the logic in the scheduler.
+
+# Dependencies that need to be met for a given task instance to get scheduled by the
+# scheduler, then queued by the scheduler, then run by an executor.
+SCHEDULER_DEPS = RUN_DEPS | {
+    DagrunRunningDep(),
+    DagUnpausedDep(),
+    ExecDateAfterStartDateDep(),
+}

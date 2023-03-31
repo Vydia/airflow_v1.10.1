@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,42 +16,40 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""DAG runs APIs."""
-from __future__ import annotations
-
-from typing import Any
-
 from flask import url_for
 
-from airflow.api.common.experimental import check_and_get_dag
-from airflow.models import DagRun
-from airflow.utils.state import DagRunState
+from airflow.exceptions import AirflowException
+from airflow.models import DagBag, DagRun
 
 
-def get_dag_runs(dag_id: str, state: str | None = None) -> list[dict[str, Any]]:
+def get_dag_runs(dag_id, state=None):
     """
-    Return a list of Dag Runs for a specific DAG ID.
-
+    Returns a list of Dag Runs for a specific DAG ID.
     :param dag_id: String identifier of a DAG
     :param state: queued|running|success...
     :return: List of DAG runs of a DAG with requested state,
-        or all runs if the state is not specified
+    or all runs if the state is not specified
     """
-    check_and_get_dag(dag_id=dag_id)
+    dagbag = DagBag()
 
-    dag_runs = []
-    state = DagRunState(state.lower()) if state else None
+    # Check DAG exists.
+    if dag_id not in dagbag.dags:
+        error_message = "Dag id {} not found".format(dag_id)
+        raise AirflowException(error_message)
+
+    dag_runs = list()
+    state = state.lower() if state else None
     for run in DagRun.find(dag_id=dag_id, state=state):
-        dag_runs.append(
-            {
-                "id": run.id,
-                "run_id": run.run_id,
-                "state": run.state,
-                "dag_id": run.dag_id,
-                "execution_date": run.execution_date.isoformat(),
-                "start_date": ((run.start_date or "") and run.start_date.isoformat()),
-                "dag_run_url": url_for("Airflow.graph", dag_id=run.dag_id, execution_date=run.execution_date),
-            }
-        )
+        dag_runs.append({
+            'id': run.id,
+            'run_id': run.run_id,
+            'state': run.state,
+            'dag_id': run.dag_id,
+            'execution_date': run.execution_date.isoformat(),
+            'start_date': ((run.start_date or '') and
+                           run.start_date.isoformat()),
+            'dag_run_url': url_for('Airflow.graph', dag_id=run.dag_id,
+                                   execution_date=run.execution_date)
+        })
 
     return dag_runs

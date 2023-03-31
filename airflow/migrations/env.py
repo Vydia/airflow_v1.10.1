@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,29 +16,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
 
-import contextlib
-import sys
+from __future__ import with_statement
+from alembic import context
 from logging.config import fileConfig
 
-from alembic import context
-
-from airflow import models, settings
-from airflow.utils.db import compare_server_default, compare_type
-
-
-def include_object(_, name, type_, *args):
-    """Filter objects for autogenerating revisions"""
-    # Ignore _anything_ to do with Celery, or FlaskSession's tables
-    if type_ == "table" and (name.startswith("celery_") or name == "session"):
-        return False
-    else:
-        return True
-
-
-# Make sure everything is imported so that alembic can find it all
-models.import_all_models()
+from airflow import settings
+from airflow.jobs import models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -51,12 +36,14 @@ fileConfig(config.config_file_name, disable_existing_loggers=False)
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = models.base.Base.metadata
+target_metadata = models.Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+COMPARE_TYPE = False
 
 
 def run_migrations_offline():
@@ -72,13 +59,8 @@ def run_migrations_offline():
 
     """
     context.configure(
-        url=settings.SQL_ALCHEMY_CONN,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        compare_type=compare_type,
-        compare_server_default=compare_server_default,
-        render_as_batch=True,
-    )
+        url=settings.SQL_ALCHEMY_CONN, target_metadata=target_metadata,
+        literal_binds=True, compare_type=COMPARE_TYPE)
 
     with context.begin_transaction():
         context.run_migrations()
@@ -91,33 +73,19 @@ def run_migrations_online():
     and associate a connection with the context.
 
     """
-    with contextlib.ExitStack() as stack:
-        connection = config.attributes.get("connection", None)
+    connectable = settings.engine
 
-        if not connection:
-            connection = stack.push(settings.engine.connect())
-
+    with connectable.connect() as connection:
         context.configure(
             connection=connection,
-            transaction_per_migration=True,
             target_metadata=target_metadata,
-            compare_type=compare_type,
-            compare_server_default=compare_server_default,
-            include_object=include_object,
-            render_as_batch=True,
+            compare_type=COMPARE_TYPE,
         )
 
         with context.begin_transaction():
             context.run_migrations()
 
-
 if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-
-if "airflow.www.app" in sys.modules:
-    # Already imported, make sure we clear out any cached app
-    from airflow.www.app import purge_cached_app
-
-    purge_cached_app()

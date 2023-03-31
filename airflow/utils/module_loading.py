@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,50 +16,39 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
+import os
+import sys
 
-import pkgutil
+from airflow import configuration as conf
 from importlib import import_module
-from types import ModuleType
-from typing import Callable
 
 
-def import_string(dotted_path: str):
+def prepare_classpath():
+    """
+    Ensures that the Airflow home directory is on the classpath
+    """
+    config_path = os.path.join(conf.get('core', 'airflow_home'), 'config')
+    config_path = os.path.expanduser(config_path)
+
+    if config_path not in sys.path:
+        sys.path.append(config_path)
+
+
+def import_string(dotted_path):
     """
     Import a dotted module path and return the attribute/class designated by the
     last name in the path. Raise ImportError if the import failed.
     """
     try:
-        module_path, class_name = dotted_path.rsplit(".", 1)
+        module_path, class_name = dotted_path.rsplit('.', 1)
     except ValueError:
-        raise ImportError(f"{dotted_path} doesn't look like a module path")
+        raise ImportError("{} doesn't look like a module path".format(dotted_path))
 
     module = import_module(module_path)
 
     try:
         return getattr(module, class_name)
-    except AttributeError:
-        raise ImportError(f'Module "{module_path}" does not define a "{class_name}" attribute/class')
-
-
-def qualname(o: object | Callable) -> str:
-    """Convert an attribute/class/function to a string importable by ``import_string``."""
-    if callable(o):
-        return f"{o.__module__}.{o.__name__}"
-
-    cls = o
-
-    if not isinstance(cls, type):  # instance or class
-        cls = type(cls)
-
-    name = cls.__qualname__
-    module = cls.__module__
-
-    if module and module != "__builtin__":
-        return f"{module}.{name}"
-
-    return name
-
-
-def iter_namespace(ns: ModuleType):
-    return pkgutil.iter_modules(ns.__path__, ns.__name__ + ".")
+    except AttributeError as err:
+        raise ImportError('Module "{}" does not define a "{}" attribute/class'.format(
+            module_path, class_name)
+        )

@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -16,25 +17,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
 
 import setproctitle
-
 from airflow import settings
 
 
-def post_worker_init(_):
-    """
-    Set process title.
-
-    This is used by airflow.cli.commands.webserver_command to track the status of the worker.
-    """
-    old_title = setproctitle.getproctitle()
-    setproctitle.setproctitle(settings.GUNICORN_WORKER_READY_PREFIX + old_title)
-
-
-def on_starting(server):
-    from airflow.providers_manager import ProvidersManager
-
-    # Load providers before forking workers
-    ProvidersManager().connection_form_widgets
+def post_worker_init(dummy_worker):
+    setproctitle.setproctitle(
+        settings.GUNICORN_WORKER_READY_PREFIX + setproctitle.getproctitle()
+    )

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,72 +16,55 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Example DAG demonstrating the usage of the params arguments in templated arguments."""
-from __future__ import annotations
 
-import datetime
-import os
-from textwrap import dedent
+from datetime import timedelta
 
-import pendulum
-
+import airflow
 from airflow import DAG
-from airflow.decorators import task
-from airflow.operators.bash import BashOperator
+from airflow.operators.bash_operator import BashOperator
+from airflow.operators.python_operator import PythonOperator
+
+dag = DAG(
+    "example_passing_params_via_test_command",
+    default_args={
+        "owner": "airflow",
+        "start_date": airflow.utils.dates.days_ago(1),
+    },
+    schedule_interval='*/1 * * * *',
+    dagrun_timeout=timedelta(minutes=4),
+)
 
 
-@task(task_id="run_this")
-def my_py_command(params, test_mode=None, task=None):
-    """
-    Print out the "foo" param passed in via
-    `airflow tasks test example_passing_params_via_test_command run_this <date>
-    -t '{"foo":"bar"}'`
-    """
-    if test_mode:
-        print(
-            f" 'foo' was passed in via test={test_mode} command : kwargs[params][foo] = {task.params['foo']}"
-        )
+def my_py_command(ds, **kwargs):
+    # Print out the "foo" param passed in via
+    # `airflow test example_passing_params_via_test_command run_this <date>
+    # -tp '{"foo":"bar"}'`
+    if kwargs["test_mode"]:
+        print(" 'foo' was passed in via test={} command : kwargs[params][foo] \
+               = {}".format(kwargs["test_mode"], kwargs["params"]["foo"]))
     # Print out the value of "miff", passed in below via the Python Operator
-    print(f" 'miff' was passed in via task params = {params['miff']}")
+    print(" 'miff' was passed in via task params = {}".format(kwargs["params"]["miff"]))
     return 1
 
 
-@task(task_id="env_var_test_task")
-def print_env_vars(test_mode=None):
-    """
-    Print out the "foo" param passed in via
-    `airflow tasks test example_passing_params_via_test_command env_var_test_task <date>
-    --env-vars '{"foo":"bar"}'`
-    """
-    if test_mode:
-        print(f"foo={os.environ.get('foo')}")
-        print(f"AIRFLOW_TEST_MODE={os.environ.get('AIRFLOW_TEST_MODE')}")
+my_templated_command = """
+    echo " 'foo was passed in via Airflow CLI Test command with value {{ params.foo }} "
+    echo " 'miff was passed in via BashOperator with value {{ params.miff }} "
+"""
 
+run_this = PythonOperator(
+    task_id='run_this',
+    provide_context=True,
+    python_callable=my_py_command,
+    params={"miff": "agg"},
+    dag=dag,
+)
 
-with DAG(
-    "example_passing_params_via_test_command",
-    schedule="*/1 * * * *",
-    start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
-    catchup=False,
-    dagrun_timeout=datetime.timedelta(minutes=4),
-    tags=["example"],
-) as dag:
-    run_this = my_py_command(params={"miff": "agg"})
+also_run_this = BashOperator(
+    task_id='also_run_this',
+    bash_command=my_templated_command,
+    params={"miff": "agg"},
+    dag=dag,
+)
 
-    my_command = dedent(
-        """
-        echo "'foo' was passed in via Airflow CLI Test command with value '$FOO'"
-        echo "'miff' was passed in via BashOperator with value '$MIFF'"
-        """
-    )
-
-    also_run_this = BashOperator(
-        task_id="also_run_this",
-        bash_command=my_command,
-        params={"miff": "agg"},
-        env={"FOO": "{{ params.foo }}", "MIFF": "{{ params.miff }}"},
-    )
-
-    env_var_test_task = print_env_vars()
-
-    run_this >> also_run_this
+run_this >> also_run_this

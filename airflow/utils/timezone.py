@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,17 +16,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
-
+#
 import datetime as dt
-from typing import overload
-
 import pendulum
-from dateutil.relativedelta import relativedelta
-from pendulum.datetime import DateTime
+
+from airflow.settings import TIMEZONE
+
 
 # UTC time zone as a tzinfo instance.
-utc = pendulum.tz.timezone("UTC")
+utc = pendulum.timezone('UTC')
 
 
 def is_localized(value):
@@ -50,115 +49,78 @@ def is_naive(value):
     return value.utcoffset() is None
 
 
-def utcnow() -> dt.datetime:
+def utcnow():
     """
     Get the current date and time in UTC
-
     :return:
     """
+
     # pendulum utcnow() is not used as that sets a TimezoneInfo object
-    # instead of a Timezone. This is not picklable and also creates issues
+    # instead of a Timezone. This is not pickable and also creates issues
     # when using replace()
-    result = dt.datetime.utcnow()
-    result = result.replace(tzinfo=utc)
+    d = dt.datetime.utcnow()
+    d = d.replace(tzinfo=utc)
 
-    return result
+    return d
 
 
-def utc_epoch() -> dt.datetime:
+def utc_epoch():
     """
     Gets the epoch in the users timezone
-
     :return:
     """
+
     # pendulum utcnow() is not used as that sets a TimezoneInfo object
-    # instead of a Timezone. This is not picklable and also creates issues
+    # instead of a Timezone. This is not pickable and also creates issues
     # when using replace()
-    result = dt.datetime(1970, 1, 1)
-    result = result.replace(tzinfo=utc)
+    d = dt.datetime(1970, 1, 1)
+    d = d.replace(tzinfo=utc)
 
-    return result
-
-
-@overload
-def convert_to_utc(value: None) -> None:
-    ...
+    return d
 
 
-@overload
-def convert_to_utc(value: dt.datetime) -> DateTime:
-    ...
-
-
-def convert_to_utc(value: dt.datetime | None) -> DateTime | None:
+def convert_to_utc(value):
     """
     Returns the datetime with the default timezone added if timezone
     information was not associated
-
     :param value: datetime
     :return: datetime with tzinfo
     """
-    if value is None:
+    if not value:
         return value
 
     if not is_localized(value):
-        from airflow.settings import TIMEZONE
-
         value = pendulum.instance(value, TIMEZONE)
 
-    return pendulum.instance(value.astimezone(utc))
+    return value.astimezone(utc)
 
 
-@overload
-def make_aware(value: None, timezone: dt.tzinfo | None = None) -> None:
-    ...
-
-
-@overload
-def make_aware(value: DateTime, timezone: dt.tzinfo | None = None) -> DateTime:
-    ...
-
-
-@overload
-def make_aware(value: dt.datetime, timezone: dt.tzinfo | None = None) -> dt.datetime:
-    ...
-
-
-def make_aware(value: dt.datetime | None, timezone: dt.tzinfo | None = None) -> dt.datetime | None:
+def make_aware(value, timezone=None):
     """
     Make a naive datetime.datetime in a given time zone aware.
 
     :param value: datetime
     :param timezone: timezone
     :return: localized datetime in settings.TIMEZONE or timezone
+
     """
     if timezone is None:
-        from airflow.settings import TIMEZONE
-
         timezone = TIMEZONE
-
-    if not value:
-        return None
 
     # Check that we won't overwrite the timezone of an aware datetime.
     if is_localized(value):
-        raise ValueError(f"make_aware expects a naive datetime, got {value}")
-    if hasattr(value, "fold"):
-        # In case of python 3.6 we want to do the same that pendulum does for python3.5
-        # i.e in case we move clock back we want to schedule the run at the time of the second
-        # instance of the same clock time rather than the first one.
-        # Fold parameter has no impact in other cases so we can safely set it to 1 here
-        value = value.replace(fold=1)
-    localized = getattr(timezone, "localize", None)
-    if localized is not None:
-        # This method is available for pytz time zones
-        return localized(value)
-    convert = getattr(timezone, "convert", None)
-    if convert is not None:
+        raise ValueError(
+            "make_aware expects a naive datetime, got %s" % value)
+
+    if hasattr(timezone, 'localize'):
+        # This method is available for pytz time zones.
+        return timezone.localize(value)
+    elif hasattr(timezone, 'convert'):
         # For pendulum
-        return convert(value)
-    # This may be wrong around DST changes!
-    return value.replace(tzinfo=timezone)
+        return timezone.convert(value)
+    else:
+        # This may be wrong around DST changes!
+        return value.replace(tzinfo=timezone)
 
 
 def make_naive(value, timezone=None):
@@ -170,20 +132,22 @@ def make_naive(value, timezone=None):
     :return: naive datetime
     """
     if timezone is None:
-        from airflow.settings import TIMEZONE
-
         timezone = TIMEZONE
 
     # Emulate the behavior of astimezone() on Python < 3.6.
     if is_naive(value):
         raise ValueError("make_naive() cannot be applied to a naive datetime")
 
-    date = value.astimezone(timezone)
+    o = value.astimezone(timezone)
 
     # cross library compatibility
-    naive = dt.datetime(
-        date.year, date.month, date.day, date.hour, date.minute, date.second, date.microsecond
-    )
+    naive = dt.datetime(o.year,
+                        o.month,
+                        o.day,
+                        o.hour,
+                        o.minute,
+                        o.second,
+                        o.microsecond)
 
     return naive
 
@@ -194,88 +158,15 @@ def datetime(*args, **kwargs):
 
     :return: datetime.datetime
     """
-    if "tzinfo" not in kwargs:
-        from airflow.settings import TIMEZONE
-
-        kwargs["tzinfo"] = TIMEZONE
+    if 'tzinfo' not in kwargs:
+        kwargs['tzinfo'] = TIMEZONE
 
     return dt.datetime(*args, **kwargs)
 
 
-def parse(string: str, timezone=None) -> DateTime:
+def parse(string, timezone=None):
     """
     Parse a time string and return an aware datetime
-
     :param string: time string
-    :param timezone: the timezone
     """
-    from airflow.settings import TIMEZONE
-
-    return pendulum.parse(string, tz=timezone or TIMEZONE, strict=False)  # type: ignore
-
-
-@overload
-def coerce_datetime(v: None, tz: dt.tzinfo | None = None) -> None:
-    ...
-
-
-@overload
-def coerce_datetime(v: DateTime, tz: dt.tzinfo | None = None) -> DateTime:
-    ...
-
-
-@overload
-def coerce_datetime(v: dt.datetime, tz: dt.tzinfo | None = None) -> DateTime:
-    ...
-
-
-def coerce_datetime(v: dt.datetime | None, tz: dt.tzinfo | None = None) -> DateTime | None:
-    """Convert ``v`` into a timezone-aware ``pendulum.DateTime``.
-
-    * If ``v`` is *None*, *None* is returned.
-    * If ``v`` is a naive datetime, it is converted to an aware Pendulum DateTime.
-    * If ``v`` is an aware datetime, it is converted to a Pendulum DateTime.
-      Note that ``tz`` is **not** taken into account in this case; the datetime
-      will maintain its original tzinfo!
-    """
-    if v is None:
-        return None
-    if isinstance(v, DateTime):
-        return v if v.tzinfo else make_aware(v, tz)
-    # Only dt.datetime is left here.
-    return pendulum.instance(v if v.tzinfo else make_aware(v, tz))
-
-
-def td_format(td_object: None | dt.timedelta | float | int) -> str | None:
-    """
-    Format a timedelta object or float/int into a readable string for time duration.
-    For example timedelta(seconds=3752) would become `1h:2M:32s`.
-    If the time is less than a second, the return will be `<1s`.
-    """
-    if not td_object:
-        return None
-    if isinstance(td_object, dt.timedelta):
-        delta = relativedelta() + td_object
-    else:
-        delta = relativedelta(seconds=int(td_object))
-    # relativedelta for timedelta cannot convert days to months
-    # so calculate months by assuming 30 day months and normalize
-    months, delta.days = divmod(delta.days, 30)
-    delta = delta.normalized() + relativedelta(months=months)
-
-    def _format_part(key: str) -> str:
-        value = int(getattr(delta, key))
-        if value < 1:
-            return ""
-        # distinguish between month/minute following strftime format
-        # and take first char of each unit, i.e. years='y', days='d'
-        if key == "minutes":
-            key = key.upper()
-        key = key[0]
-        return f"{value}{key}"
-
-    parts = map(_format_part, ("years", "months", "days", "hours", "minutes", "seconds"))
-    joined = ":".join(part for part in parts if part)
-    if not joined:
-        return "<1s"
-    return joined
+    return pendulum.parse(string, tz=timezone or TIMEZONE)

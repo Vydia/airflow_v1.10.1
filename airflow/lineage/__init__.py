@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,145 +16,126 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Provides lineage support functions."""
-from __future__ import annotations
-
-import itertools
-import logging
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
 
-from airflow.configuration import conf
-from airflow.lineage.backend import LineageBackend
+from airflow import configuration as conf
+from airflow.lineage.datasets import DataSet
+from airflow.utils.log.logging_mixin import LoggingMixin
+from airflow.utils.module_loading import import_string, prepare_classpath
 
-if TYPE_CHECKING:
-    from airflow.utils.context import Context
-
+from itertools import chain
 
 PIPELINE_OUTLETS = "pipeline_outlets"
 PIPELINE_INLETS = "pipeline_inlets"
-AUTO = "auto"
 
-log = logging.getLogger(__name__)
-
-
-def get_backend() -> LineageBackend | None:
-    """Gets the lineage backend if defined in the configs."""
-    clazz = conf.getimport("lineage", "backend", fallback=None)
-
-    if clazz:
-        if not issubclass(clazz, LineageBackend):
-            raise TypeError(
-                f"Your custom Lineage class `{clazz.__name__}` "
-                f"is not a subclass of `{LineageBackend.__name__}`."
-            )
-        else:
-            return clazz()
-
-    return None
+log = LoggingMixin().log
 
 
-def _render_object(obj: Any, context: Context) -> dict:
-    return context["ti"].task.render_template(obj, context)
+def _get_backend():
+    backend = None
+
+    try:
+        _backend_str = conf.get("lineage", "backend")
+        prepare_classpath()
+        backend = import_string(_backend_str)
+    except ImportError as ie:
+        log.debug("Cannot import %s due to %s", _backend_str, ie)
+    except conf.AirflowConfigException:
+        log.debug("Could not find lineage backend key in config")
+
+    return backend
 
 
-T = TypeVar("T", bound=Callable)
-
-
-def apply_lineage(func: T) -> T:
+def apply_lineage(func):
     """
-    Conditionally send lineage to the backend.
-
     Saves the lineage to XCom and if configured to do so sends it
     to the backend.
     """
-    _backend = get_backend()
+    backend = _get_backend()
 
     @wraps(func)
     def wrapper(self, context, *args, **kwargs):
-
-        self.log.debug("Lineage called with inlets: %s, outlets: %s", self.inlets, self.outlets)
-
+        self.log.debug("Lineage called with inlets: %s, outlets: %s",
+                       self.inlets, self.outlets)
         ret_val = func(self, context, *args, **kwargs)
 
-        outlets = list(self.outlets)
-        inlets = list(self.inlets)
+        outlets = [x.as_dict() for x in self.outlets]
+        inlets = [x.as_dict() for x in self.inlets]
 
-        if outlets:
-            self.xcom_push(
-                context, key=PIPELINE_OUTLETS, value=outlets, execution_date=context["ti"].execution_date
-            )
+        if len(self.outlets) > 0:
+            self.xcom_push(context,
+                           key=PIPELINE_OUTLETS,
+                           value=outlets,
+                           execution_date=context['ti'].execution_date)
 
-        if inlets:
-            self.xcom_push(
-                context, key=PIPELINE_INLETS, value=inlets, execution_date=context["ti"].execution_date
-            )
+        if len(self.inlets) > 0:
+            self.xcom_push(context,
+                           key=PIPELINE_INLETS,
+                           value=inlets,
+                           execution_date=context['ti'].execution_date)
 
-        if _backend:
-            _backend.send_lineage(operator=self, inlets=self.inlets, outlets=self.outlets, context=context)
+        if backend:
+            backend.send_lineage(operator=self, inlets=self.inlets,
+                                 outlets=self.outlets, context=context)
 
         return ret_val
 
-    return cast(T, wrapper)
+    return wrapper
 
 
-def prepare_lineage(func: T) -> T:
+def prepare_lineage(func):
     """
-    Prepares the lineage inlets and outlets.
-
-    Inlets can be:
-
-    * "auto" -> picks up any outlets from direct upstream tasks that have outlets defined, as such that
-      if A -> B -> C and B does not have outlets but A does, these are provided as inlets.
-    * "list of task_ids" -> picks up outlets from the upstream task_ids
-    * "list of datasets" -> manually defined list of data
-
+    Prepares the lineage inlets and outlets
+    inlets can be:
+        "auto" -> picks up any outlets from direct upstream tasks that have outlets
+        defined, as such that if A -> B -> C and B does not have outlets but A does,
+        these are provided as inlets.
+        "list of task_ids" -> picks up outlets from the upstream task_ids
+        "list of datasets" -> manually defined list of DataSet
     """
-
     @wraps(func)
     def wrapper(self, context, *args, **kwargs):
-        from airflow.models.abstractoperator import AbstractOperator
-
         self.log.debug("Preparing lineage inlets and outlets")
 
-        if isinstance(self.inlets, (str, AbstractOperator)):
-            self.inlets = [self.inlets]
+        task_ids = set(self._inlets['task_ids']).intersection(
+            self.get_flat_relative_ids(upstream=True)
+        )
+        if task_ids:
+            inlets = self.xcom_pull(context,
+                                    task_ids=task_ids,
+                                    dag_id=self.dag_id,
+                                    key=PIPELINE_OUTLETS)
+            inlets = [item for sublist in inlets if sublist for item in sublist]
+            inlets = [DataSet.map_type(i['typeName'])(data=i['attributes'])
+                      for i in inlets]
+            self.inlets.extend(inlets)
 
-        if self.inlets and isinstance(self.inlets, list):
-            # get task_ids that are specified as parameter and make sure they are upstream
-            task_ids = (
-                {o for o in self.inlets if isinstance(o, str)}
-                .union(op.task_id for op in self.inlets if isinstance(op, AbstractOperator))
-                .intersection(self.get_flat_relative_ids(upstream=True))
+        if self._inlets['auto']:
+            # dont append twice
+            task_ids = set(self._inlets['task_ids']).symmetric_difference(
+                self.upstream_task_ids
             )
+            inlets = self.xcom_pull(context,
+                                    task_ids=task_ids,
+                                    dag_id=self.dag_id,
+                                    key=PIPELINE_OUTLETS)
+            inlets = [item for sublist in inlets if sublist for item in sublist]
+            inlets = [DataSet.map_type(i['typeName'])(data=i['attributes'])
+                      for i in inlets]
+            self.inlets.extend(inlets)
 
-            # pick up unique direct upstream task_ids if AUTO is specified
-            if AUTO.upper() in self.inlets or AUTO.lower() in self.inlets:
-                task_ids = task_ids.union(task_ids.symmetric_difference(self.upstream_task_ids))
+        if len(self._inlets['datasets']) > 0:
+            self.inlets.extend(self._inlets['datasets'])
 
-            # Remove auto and task_ids
-            self.inlets = [i for i in self.inlets if not isinstance(i, str)]
-            _inlets = self.xcom_pull(context, task_ids=task_ids, dag_id=self.dag_id, key=PIPELINE_OUTLETS)
-
-            # re-instantiate the obtained inlets
-            # xcom_pull returns a list of items for each given task_id
-            _inlets = [item for item in itertools.chain.from_iterable(_inlets)]
-
-            self.inlets.extend(_inlets)
-
-        elif self.inlets:
-            raise AttributeError("inlets is not a list, operator, string or attr annotated object")
-
-        if not isinstance(self.outlets, list):
-            self.outlets = [self.outlets]
-
-        # render inlets and outlets
-        self.inlets = [_render_object(i, context) for i in self.inlets]
-
-        self.outlets = [_render_object(i, context) for i in self.outlets]
+        # outlets
+        if len(self._outlets['datasets']) > 0:
+            self.outlets.extend(self._outlets['datasets'])
 
         self.log.debug("inlets: %s, outlets: %s", self.inlets, self.outlets)
 
+        for dataset in chain(self.inlets, self.outlets):
+            dataset.set_context(context)
+
         return func(self, context, *args, **kwargs)
 
-    return cast(T, wrapper)
+    return wrapper

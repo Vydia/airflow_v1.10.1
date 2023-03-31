@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,30 +16,28 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from __future__ import annotations
+#
+from __future__ import unicode_literals
 
-from enum import Enum
-
-from airflow.compat.functools import cache
+from builtins import object
 
 
-class WeightRule(str, Enum):
-    """Weight rules."""
+class WeightRule(object):
+    DOWNSTREAM = 'downstream'
+    UPSTREAM = 'upstream'
+    ABSOLUTE = 'absolute'
 
-    DOWNSTREAM = "downstream"
-    UPSTREAM = "upstream"
-    ABSOLUTE = "absolute"
-
+    _ALL_WEIGHT_RULES = {}
     @classmethod
-    def is_valid(cls, weight_rule: str) -> bool:
-        """Check if weight rule is valid."""
+    def is_valid(cls, weight_rule):
         return weight_rule in cls.all_weight_rules()
 
     @classmethod
-    @cache
-    def all_weight_rules(cls) -> set[str]:
-        """Returns all weight rules"""
-        return set(cls.__members__.values())
-
-    def __str__(self) -> str:
-        return self.value
+    def all_weight_rules(cls):
+        if not cls._ALL_WEIGHT_RULES:
+            cls._ALL_WEIGHT_RULES = {
+                getattr(cls, attr)
+                for attr in dir(cls)
+                if not attr.startswith("_") and not callable(getattr(cls, attr))
+            }
+        return cls._ALL_WEIGHT_RULES

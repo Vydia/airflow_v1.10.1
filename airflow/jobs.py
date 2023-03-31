@@ -1630,6 +1630,7 @@ class SchedulerJob(BaseJob):
         :type processor_manager: DagFileProcessorManager
         :return: None
         """
+        exe_name = self.executor.__class__.__name__
         self.executor.start()
 
         self.log.info("Resetting orphaned tasks for active dag runs")
@@ -1648,23 +1649,29 @@ class SchedulerJob(BaseJob):
         known_file_paths = processor_manager.file_paths
 
         # For the execute duration, parse and schedule DAGs
-        while (timezone.utcnow() - execute_start_time).total_seconds() < \
-                self.run_duration or self.run_duration < 0:
-            self.log.debug("Starting Loop...")
-            loop_start_time = time.time()
+        while True:
 
-            # Traverse the DAG directory for Python files containing DAGs
-            # periodically
-            elapsed_time_since_refresh = (timezone.utcnow() -
-                                          last_dag_dir_refresh_time).total_seconds()
+            loop_start_time = timezone.utcnow()
+            task_duration_seconds = (loop_start_time - execute_start_time).total_seconds()
+            self.log.debug(f"{exe_name}: Starting worker loop task_duration_seconds: {task_duration_seconds}")
+
+            if self.executor.recieved_kill_signal:
+                self.log.debug(f"{exe_name}: Got kill signal. Exiting worker loop")
+                break
+
+            if self.run_duration and task_duration_seconds >= self.run_duration:
+                self.log.debug(f"{exe_name}: Worked long enough. Exiting worker loop")
+                break
+
+            # Traverse the DAG directory for Python files containing DAGs periodically
+            elapsed_time_since_refresh = (loop_start_time - last_dag_dir_refresh_time).total_seconds()
 
             if elapsed_time_since_refresh > self.dag_dir_list_interval:
                 # Build up a list of Python files that could contain DAGs
                 self.log.info("Searching for files in %s", self.subdir)
                 known_file_paths = list_py_file_paths(self.subdir)
-                last_dag_dir_refresh_time = timezone.utcnow()
-                self.log.info(
-                    "There are %s files in %s", len(known_file_paths), self.subdir)
+                last_dag_dir_refresh_time = loop_start_time
+                self.log.info("There are %s files in %s", len(known_file_paths), self.subdir)
 
                 processor_manager.set_file_paths(known_file_paths)
 
@@ -1724,14 +1731,12 @@ class SchedulerJob(BaseJob):
                 last_self_heartbeat_time = timezone.utcnow()
 
             # Occasionally print out stats about how fast the files are getting processed
-            if ((timezone.utcnow() - last_stat_print_time).total_seconds() >
-                    self.print_stats_interval):
+            if ((timezone.utcnow() - last_stat_print_time).total_seconds() > self.print_stats_interval):
                 if len(known_file_paths) > 0:
-                    self._log_file_processing_stats(known_file_paths,
-                                                    processor_manager)
+                    self._log_file_processing_stats(known_file_paths, processor_manager)
                 last_stat_print_time = timezone.utcnow()
 
-            loop_end_time = time.time()
+            loop_end_time = timezone.utcnow()
             self.log.debug(
                 "Ran scheduling loop in %.2f seconds",
                 loop_end_time - loop_start_time)
@@ -2596,13 +2601,6 @@ class LocalTaskJob(BaseJob):
     def _execute(self):
         self.task_runner = get_task_runner(self)
 
-        def signal_handler(signum, frame):
-            """Setting kill signal handler"""
-            self.log.error("Received SIGTERM. Terminating subprocesses")
-            self.on_kill()
-            raise AirflowException("LocalTaskJob received SIGTERM signal")
-        signal.signal(signal.SIGTERM, signal_handler)
-
         if not self.task_instance._check_and_change_state_before_execution(
                 mark_success=self.mark_success,
                 ignore_all_deps=self.ignore_all_deps,
@@ -2621,14 +2619,14 @@ class LocalTaskJob(BaseJob):
             heartbeat_time_limit = conf.getint('scheduler',
                                                'scheduler_zombie_task_threshold')
             while True:
+
                 # Monitor the task to see if it's done
                 return_code = self.task_runner.return_code()
                 if return_code is not None:
                     self.log.info("Task exited with return code %s", return_code)
                     return
 
-                # Periodically heartbeat so that the scheduler doesn't think this
-                # is a zombie
+                # Periodically heartbeat so that the scheduler doesn't think this is a zombie
                 try:
                     self.heartbeat()
                     last_heartbeat_time = time.time()

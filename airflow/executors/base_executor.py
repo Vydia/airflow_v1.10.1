@@ -17,6 +17,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import signal
 from builtins import range
 
 from airflow import configuration
@@ -42,6 +43,14 @@ class BaseExecutor(LoggingMixin):
         self.queued_tasks = {}
         self.running = {}
         self.event_buffer = {}
+        self.recieved_kill_signal = False
+        #
+        def default_signal_handler(signum, frame):
+            """Setting kill signal handler"""
+            self.log.error(f"Received SIGTERM '{signum}'. Terminating subprocesses")
+            # self.on_kill()
+            self.recieved_kill_signal = True
+        signal.signal(signal.SIGTERM, default_signal_handler)
 
     def start(self):  # pragma: no cover
         """

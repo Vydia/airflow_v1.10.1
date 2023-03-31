@@ -72,6 +72,7 @@ class CeleryExecutor(BaseExecutor):
     vast amounts of messages, while providing operations with the tools
     required to maintain such a system.
     """
+
     def start(self):
         self.tasks = {}
         self.last_state = {}

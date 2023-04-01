@@ -2053,7 +2053,7 @@ class SchedulerJobTest(unittest.TestCase):
         executor = TestExecutor()
         scheduler.executor = executor
 
-        scheduler._execute_helper(processor_manager=processor)
+        scheduler._execute_scheduler_helper(processor_manager=processor)
 
         ti = dr.get_task_instance(task_id=op1.task_id, session=session)
         self.assertEqual(ti.state, State.NONE)

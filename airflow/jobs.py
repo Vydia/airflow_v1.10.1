@@ -68,6 +68,56 @@ Base = models.Base
 ID_LEN = models.ID_LEN
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------------------- #
+# TODO: put into classes into separate files
+# ---------------------------------------------------------------------------------------------------- #
+
 class BaseJob(Base, LoggingMixin):
     """
     Abstract class to be derived for jobs. Jobs are processing items with state
@@ -113,6 +163,13 @@ class BaseJob(Base, LoggingMixin):
         self.unixname = getpass.getuser()
         self.max_tis_per_query = conf.getint('scheduler', 'max_tis_per_query')
         super(BaseJob, self).__init__(*args, **kwargs)
+        #
+        self.recieved_kill_signal = False
+        def signal_term_handler(signum, frame):
+            self.log.info(f"Received SIGTERM '{signum}'. Terminating subprocesses")
+            self.recieved_kill_signal = True
+        signal.signal(signal.SIGTERM, signal_term_handler)
+
 
     def is_alive(self):
         return (
@@ -297,6 +354,56 @@ class BaseJob(Base, LoggingMixin):
         )
         return reset_tis
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------------------- #
+# TODO: put into classes into separate files
+# ---------------------------------------------------------------------------------------------------- #
 
 class DagFileProcessor(AbstractDagFileProcessor, LoggingMixin):
     """Helps call SchedulerJob.process_file() in a separate process."""
@@ -512,6 +619,56 @@ class DagFileProcessor(AbstractDagFileProcessor, LoggingMixin):
         return self._start_time
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------------------- #
+# TODO: put into classes into separate files
+# ---------------------------------------------------------------------------------------------------- #
+
 class SchedulerJob(BaseJob):
     """
     This SchedulerJob runs for a specific time interval and schedules the jobs
@@ -585,20 +742,19 @@ class SchedulerJob(BaseJob):
             self.using_sqlite = True
 
         # How often to scan the DAGs directory for new files. Default to 5 minutes.
-        self.dag_dir_list_interval = conf.getint('scheduler',
-                                                 'dag_dir_list_interval')
+        self.dag_dir_list_interval = conf.getint('scheduler', 'dag_dir_list_interval')
+
         # How often to print out DAG file processing stats to the log. Default to
         # 30 seconds.
-        self.print_stats_interval = conf.getint('scheduler',
-                                                'print_stats_interval')
+        self.print_stats_interval = conf.getint('scheduler', 'print_stats_interval')
+
         # Parse and schedule each file no faster than this interval. Default
         # to 3 minutes.
         self.file_process_interval = file_process_interval
 
         self.max_tis_per_query = conf.getint('scheduler', 'max_tis_per_query')
         if run_duration is None:
-            self.run_duration = conf.getint('scheduler',
-                                            'run_duration')
+            self.run_duration = conf.getint('scheduler', 'run_duration')
 
     @provide_session
     def manage_slas(self, dag, session=None):
@@ -1212,8 +1368,7 @@ class SchedulerJob(BaseJob):
                 open_slots -= 1
                 dag_id_to_possibly_running_task_count[dag_id] += 1
 
-        task_instance_str = "\n\t".join(
-            ["{}".format(x) for x in executable_tis])
+        task_instance_str = "\n\t".join(["{}".format(x) for x in executable_tis])
         self.log.info(
             "Setting the follow tasks to queued state:\n\t%s", task_instance_str)
         # so these dont expire on commit
@@ -1585,7 +1740,7 @@ class SchedulerJob(BaseJob):
                                                     processor_factory)
 
         try:
-            self._execute_helper(processor_manager)
+            self._execute_scheduler_helper(processor_manager)
         finally:
             self.log.info("Exited execute loop")
 
@@ -1624,7 +1779,7 @@ class SchedulerJob(BaseJob):
                         child.kill()
                         child.wait()
 
-    def _execute_helper(self, processor_manager):
+    def _execute_scheduler_helper(self, processor_manager):
         """
         :param processor_manager: manager to use
         :type processor_manager: DagFileProcessorManager
@@ -1653,14 +1808,14 @@ class SchedulerJob(BaseJob):
 
             loop_start_time = timezone.utcnow()
             task_duration_seconds = (loop_start_time - execute_start_time).total_seconds()
-            self.log.debug(f"{exe_name}: Starting worker loop task_duration_seconds: {task_duration_seconds}")
+            self.log.info(f"{exe_name}: Starting worker loop task_duration_seconds: {task_duration_seconds}")
 
-            # if self.executor.recieved_kill_signal:
-            #     self.log.debug(f"{exe_name}: Got kill signal. Exiting worker loop")
-            #     break
+            if self.recieved_kill_signal:
+                self.log.info(f"{exe_name}: Got kill signal. Exiting worker loop")
+                break
 
             if self.run_duration and task_duration_seconds >= self.run_duration:
-                self.log.debug(f"{exe_name}: Worked long enough. Exiting worker loop")
+                self.log.info(f"{exe_name}: Worked long enough. Exiting worker loop")
                 break
 
             # Traverse the DAG directory for Python files containing DAGs periodically
@@ -1737,11 +1892,10 @@ class SchedulerJob(BaseJob):
                 last_stat_print_time = timezone.utcnow()
 
             loop_end_time = timezone.utcnow()
-            self.log.debug(
-                "Ran scheduling loop in %.2f seconds",
-                loop_end_time - loop_start_time)
-            self.log.debug("Sleeping for %.2f seconds", self._processor_poll_interval)
-            time.sleep(self._processor_poll_interval)
+            self.log.info("Ran scheduling loop in %.2f seconds", loop_end_time - loop_start_time)
+
+            # self.log.debug("Sleeping for %.2f seconds", self._processor_poll_interval)
+            # time.sleep(self._processor_poll_interval)
 
             # Exit early for a test mode
             if processor_manager.max_runs_reached():
@@ -1896,6 +2050,56 @@ class SchedulerJob(BaseJob):
     def heartbeat_callback(self, session=None):
         Stats.incr('scheduler_heartbeat', 1, 1)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------------------- #
+# TODO: put into classes into separate files
+# ---------------------------------------------------------------------------------------------------- #
 
 class BackfillJob(BaseJob):
     """
@@ -2565,6 +2769,56 @@ class BackfillJob(BaseJob):
         self.log.info("Backfill done. Exiting.")
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------------------- #
+# TODO: put into classes into separate files
+# ---------------------------------------------------------------------------------------------------- #
+
 class LocalTaskJob(BaseJob):
 
     __mapper_args__ = {
@@ -2601,13 +2855,6 @@ class LocalTaskJob(BaseJob):
     def _execute(self):
         self.task_runner = get_task_runner(self)
 
-        def signal_handler(signum, frame):
-            """Setting kill signal handler"""
-            self.log.error("Received SIGTERM. Terminating subprocesses")
-            # self.on_kill()
-            # raise AirflowException("LocalTaskJob received SIGTERM signal")
-        signal.signal(signal.SIGTERM, signal_handler)
-
         if not self.task_instance._check_and_change_state_before_execution(
                 mark_success=self.mark_success,
                 ignore_all_deps=self.ignore_all_deps,
@@ -2626,6 +2873,10 @@ class LocalTaskJob(BaseJob):
             heartbeat_time_limit = conf.getint('scheduler',
                                                'scheduler_zombie_task_threshold')
             while True:
+
+                if self.recieved_kill_signal:
+                    self.log.info("Got kill signal. Exiting worker loop")
+                    break
 
                 # Monitor the task to see if it's done
                 return_code = self.task_runner.return_code()

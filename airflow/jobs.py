@@ -1655,9 +1655,9 @@ class SchedulerJob(BaseJob):
             task_duration_seconds = (loop_start_time - execute_start_time).total_seconds()
             self.log.debug(f"{exe_name}: Starting worker loop task_duration_seconds: {task_duration_seconds}")
 
-            if self.executor.recieved_kill_signal:
-                self.log.debug(f"{exe_name}: Got kill signal. Exiting worker loop")
-                break
+            # if self.executor.recieved_kill_signal:
+            #     self.log.debug(f"{exe_name}: Got kill signal. Exiting worker loop")
+            #     break
 
             if self.run_duration and task_duration_seconds >= self.run_duration:
                 self.log.debug(f"{exe_name}: Worked long enough. Exiting worker loop")
@@ -2600,6 +2600,13 @@ class LocalTaskJob(BaseJob):
 
     def _execute(self):
         self.task_runner = get_task_runner(self)
+
+        def signal_handler(signum, frame):
+            """Setting kill signal handler"""
+            self.log.error("Received SIGTERM. Terminating subprocesses")
+            # self.on_kill()
+            # raise AirflowException("LocalTaskJob received SIGTERM signal")
+        signal.signal(signal.SIGTERM, signal_handler)
 
         if not self.task_instance._check_and_change_state_before_execution(
                 mark_success=self.mark_success,

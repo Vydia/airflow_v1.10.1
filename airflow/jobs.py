@@ -163,6 +163,13 @@ class BaseJob(Base, LoggingMixin):
         self.unixname = getpass.getuser()
         self.max_tis_per_query = conf.getint('scheduler', 'max_tis_per_query')
         super(BaseJob, self).__init__(*args, **kwargs)
+        #
+        self.recieved_kill_signal = False
+        def signal_term_handler(signum, frame):
+            self.log.info(f"Received SIGTERM '{signum}'. Terminating subprocesses")
+            self.recieved_kill_signal = True
+        signal.signal(signal.SIGTERM, signal_term_handler)
+
 
     def is_alive(self):
         return (
@@ -748,12 +755,6 @@ class SchedulerJob(BaseJob):
         self.max_tis_per_query = conf.getint('scheduler', 'max_tis_per_query')
         if run_duration is None:
             self.run_duration = conf.getint('scheduler', 'run_duration')
-
-        self.recieved_kill_signal = False
-        def signal_term_handler(signum, frame):
-            self.log.info("Received SIGTERM. Terminating subprocesses")
-            self.recieved_kill_signal = True
-        signal.signal(signal.SIGTERM, signal_term_handler)
 
     @provide_session
     def manage_slas(self, dag, session=None):
@@ -1367,8 +1368,7 @@ class SchedulerJob(BaseJob):
                 open_slots -= 1
                 dag_id_to_possibly_running_task_count[dag_id] += 1
 
-        task_instance_str = "\n\t".join(
-            ["{}".format(x) for x in executable_tis])
+        task_instance_str = "\n\t".join(["{}".format(x) for x in executable_tis])
         self.log.info(
             "Setting the follow tasks to queued state:\n\t%s", task_instance_str)
         # so these dont expire on commit
@@ -1810,9 +1810,9 @@ class SchedulerJob(BaseJob):
             task_duration_seconds = (loop_start_time - execute_start_time).total_seconds()
             self.log.info(f"{exe_name}: Starting worker loop task_duration_seconds: {task_duration_seconds}")
 
-            # if self.executor.recieved_kill_signal:
-            #     self.log.debug(f"{exe_name}: Got kill signal. Exiting worker loop")
-            #     break
+            if self.recieved_kill_signal:
+                self.log.info(f"{exe_name}: Got kill signal. Exiting worker loop")
+                break
 
             if self.run_duration and task_duration_seconds >= self.run_duration:
                 self.log.info(f"{exe_name}: Worked long enough. Exiting worker loop")
@@ -2855,13 +2855,6 @@ class LocalTaskJob(BaseJob):
     def _execute(self):
         self.task_runner = get_task_runner(self)
 
-        # def signal_handler(signum, frame):
-        #     """Setting kill signal handler"""
-        #     self.log.error("Received SIGTERM. Terminating subprocesses")
-        #     # self.on_kill()
-        #     # raise AirflowException("LocalTaskJob received SIGTERM signal")
-        # signal.signal(signal.SIGTERM, signal_handler)
-
         if not self.task_instance._check_and_change_state_before_execution(
                 mark_success=self.mark_success,
                 ignore_all_deps=self.ignore_all_deps,
@@ -2880,6 +2873,10 @@ class LocalTaskJob(BaseJob):
             heartbeat_time_limit = conf.getint('scheduler',
                                                'scheduler_zombie_task_threshold')
             while True:
+
+                if self.recieved_kill_signal:
+                    self.log.info("Got kill signal. Exiting worker loop")
+                    break
 
                 # Monitor the task to see if it's done
                 return_code = self.task_runner.return_code()

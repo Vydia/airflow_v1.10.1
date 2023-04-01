@@ -1651,26 +1651,30 @@ class SchedulerJob(BaseJob):
         # For the execute duration, parse and schedule DAGs
         while True:
 
+            # Traverse the DAG directory for Python files containing DAGs
+            # periodically
+            elapsed_time_since_refresh = (timezone.utcnow() -
+                                          last_dag_dir_refresh_time).total_seconds()
             loop_start_time = timezone.utcnow()
             task_duration_seconds = (loop_start_time - execute_start_time).total_seconds()
             self.log.debug(f"{exe_name}: Starting worker loop task_duration_seconds: {task_duration_seconds}")
 
-            if self.executor.recieved_kill_signal:
-                self.log.debug(f"{exe_name}: Got kill signal. Exiting worker loop")
-                break
+            # if self.executor.recieved_kill_signal:
+            #     self.log.debug(f"{exe_name}: Got kill signal. Exiting worker loop")
+            #     break
 
             if self.run_duration and task_duration_seconds >= self.run_duration:
                 self.log.debug(f"{exe_name}: Worked long enough. Exiting worker loop")
                 break
 
             # Traverse the DAG directory for Python files containing DAGs periodically
-            elapsed_time_since_refresh = (loop_start_time - last_dag_dir_refresh_time).total_seconds()
+            elapsed_time_since_refresh = (timezone.utcnow() - last_dag_dir_refresh_time).total_seconds()
 
             if elapsed_time_since_refresh > self.dag_dir_list_interval:
                 # Build up a list of Python files that could contain DAGs
                 self.log.info("Searching for files in %s", self.subdir)
                 known_file_paths = list_py_file_paths(self.subdir)
-                last_dag_dir_refresh_time = loop_start_time
+                last_dag_dir_refresh_time = timezone.utcnow()
                 self.log.info("There are %s files in %s", len(known_file_paths), self.subdir)
 
                 processor_manager.set_file_paths(known_file_paths)
@@ -2600,6 +2604,13 @@ class LocalTaskJob(BaseJob):
 
     def _execute(self):
         self.task_runner = get_task_runner(self)
+
+        def signal_handler(signum, frame):
+            """Setting kill signal handler"""
+            self.log.error("Received SIGTERM. Terminating subprocesses")
+            # self.on_kill()
+            # raise AirflowException("LocalTaskJob received SIGTERM signal")
+        signal.signal(signal.SIGTERM, signal_handler)
 
         if not self.task_instance._check_and_change_state_before_execution(
                 mark_success=self.mark_success,

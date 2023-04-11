@@ -46,7 +46,7 @@
             <tr>
                 <th></th>
                 <th width="12"><span id="pause_header" class="glyphicon glyphicon-info-sign" title="Use this toggle to pause a DAG. The scheduler won't schedule new tasks instances for a paused DAG. Tasks already running at pause time won't be affected."></span></th>
-                <th>DAG</th>
+                <th>dag_id</th>
                 <th>Schedule</th>
                 <th>Owner</th>
                 <th style="padding-left: 5px;">Recent Tasks
@@ -95,6 +95,10 @@
                     {% if dag_id not in orm_dags %}
                         <span class="glyphicon glyphicon-info-sign" class="info" aria-hidden="true" title="This DAG seems to be existing only locally. The master scheduler doesn't seem to be aware of its existence."></span>
                     {% endif %}
+                    <a href="{{ url_for('airflow.trigger', dag_id=dag.dag_id) }}"
+                    onclick="return confirmTriggerDag('{{ dag.safe_dag_id }}')">
+                     <span class="glyphicon glyphicon-play-circle" aria-hidden="true" data-original-title="Trigger Dag"></span>
+                    </a>
                 </td>
 
                 <!-- Column 4: Dag Schedule -->
@@ -314,7 +318,7 @@
           .tooltip();
           if(this.active_dag_run >= this.max_active_runs) {
             $('.label.schedule.' + this.dag_id)
-            .css('background-color', 'red');
+            .css('background-color', 'lime');
           }
         });
       });

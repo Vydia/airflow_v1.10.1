@@ -65,7 +65,8 @@
         <tbody>
         {% for dag_id in dag_ids_in_page %}
             {% set dag = webserver_dags[dag_id] if dag_id in webserver_dags else None %}
-            <tr>
+            <tr class="tr_{{ dag_id }}">
+
                 <!-- Column 1: Edit dag -->
                 <td class="text-center" style="width:10px;">
                     {% if dag_id in orm_dags %}
@@ -317,8 +318,8 @@
           .attr('title', this.active_dag_run + '/' + this.max_active_runs + ' active dag runs')
           .tooltip();
           if(this.active_dag_run >= this.max_active_runs) {
-            $('.label.schedule.' + this.dag_id)
-            .css('background-color', 'lime');
+            $('.label.schedule.' + this.dag_id).css('background-color', 'lime');
+            $('.tr_' + this.dag_id).css('background-color', '#00FF0020');
           }
         });
       });

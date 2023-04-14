@@ -1892,7 +1892,7 @@ class SchedulerJob(BaseJob):
                 last_stat_print_time = timezone.utcnow()
 
             loop_end_time = timezone.utcnow()
-            self.log.info("Ran scheduling loop in %.2f seconds", loop_end_time - loop_start_time)
+            self.log.info(f"Ran scheduling loop in {loop_end_time - loop_start_time} seconds")
 
             # self.log.debug("Sleeping for %.2f seconds", self._processor_poll_interval)
             # time.sleep(self._processor_poll_interval)

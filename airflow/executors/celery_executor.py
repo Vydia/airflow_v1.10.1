@@ -86,7 +86,8 @@ class CeleryExecutor(BaseExecutor):
         self.log.info(f"[celery] queuing {key} through celery, queue={queue}")
         self.tasks[key] = execute_command.apply_async(args=[command], queue=queue)
         self.last_state[key] = celery_states.PENDING
-        self.redis_db.sadd(self.tasks_pending_key, key)
+        key_hash = f"{key[0]}__{key[1]}"
+        self.redis_db.sadd(self.tasks_pending_key, key_hash)
 
     def sync(self):
         self.log.debug("Inquiring about %s celery task(s)", len(self.tasks))
@@ -95,7 +96,8 @@ class CeleryExecutor(BaseExecutor):
                 state = task.state
 
                 if state not in (celery_states.PENDING, celery_states.RETRY):
-                    self.redis_db.srem(self.tasks_pending_key, key)
+                    key_hash = f"{key[0]}__{key[1]}"
+                    self.redis_db.srem(self.tasks_pending_key, key_hash)
 
                 if self.last_state[key] != state:
                     if state == celery_states.SUCCESS:

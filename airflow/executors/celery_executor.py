@@ -94,22 +94,36 @@ class CeleryExecutor(BaseExecutor):
         key_hash = f"{key[0]}__{key[1]}"
         self.redis_db.sadd(self.tasks_pending_key, key_hash)
 
+    def heartbeat(self):
+        super(CeleryExecutor, self).heartbeat()
+        self.refresh_redis_events()
+
+    def refresh_redis_events(self):
+        self.log.info(f"refresh_redis_events for {len(self.tasks)} celery task(s)")
+        for key, task in list(self.tasks.items()):
+            state = task.state
+            self.update_redis_event(key, state)
+
+    def update_redis_event(self, key, state):
+        key_hash = f"{key[0]}__{key[1]}"
+
+        # Check pending jobs in Redis
+        if state not in (celery_states.PENDING, celery_states.RETRY):
+            self.redis_db.srem(self.tasks_pending_key, key_hash)
+
+        # Check running jobs in Redis
+        if state in (celery_states.STARTED, celery_states.RECEIVED):
+            self.redis_db.sadd(self.tasks_running_key, key_hash)
+        else:
+            self.redis_db.srem(self.tasks_running_key, key_hash)
+
     def sync(self):
         self.log.debug("Inquiring about %s celery task(s)", len(self.tasks))
         for key, task in list(self.tasks.items()):
             try:
                 state = task.state
-                key_hash = f"{key[0]}__{key[1]}"
 
-                # Check pending jobs in Redis
-                if state not in (celery_states.PENDING, celery_states.RETRY):
-                    self.redis_db.srem(self.tasks_pending_key, key_hash)
-
-                # Check running jobs in Redis
-                if state in (celery_states.STARTED, celery_states.RECEIVED):
-                    self.redis_db.sadd(self.tasks_running_key, key_hash)
-                else:
-                    self.redis_db.srem(self.tasks_running_key, key_hash)
+                self.update_redis_event(key, state)
 
                 if self.last_state[key] != state:
                     if state == celery_states.SUCCESS:

@@ -73,23 +73,30 @@ class CeleryExecutor(BaseExecutor):
     required to maintain such a system.
     """
     def start(self):
+        import redis
         self.tasks = {}
         self.last_state = {}
+        self.redis_db = redis.Redis(host=os.getenv("REDIS_HOST"), port=os.getenv("REDIS_PORT"))
+        self.namespace_override = "celery_"
+        self.tasks_pending_key = f"{self.namespace_override}tasks_pending"
 
     def execute_async(self, key, command,
                       queue=DEFAULT_CELERY_CONFIG['task_default_queue'],
                       executor_config=None):
-        self.log.info("[celery] queuing {key} through celery, "
-                      "queue={queue}".format(**locals()))
-        self.tasks[key] = execute_command.apply_async(
-            args=[command], queue=queue)
+        self.log.info(f"[celery] queuing {key} through celery, queue={queue}")
+        self.tasks[key] = execute_command.apply_async(args=[command], queue=queue)
         self.last_state[key] = celery_states.PENDING
+        self.redis_db.sadd(self.tasks_pending_key, key)
 
     def sync(self):
         self.log.debug("Inquiring about %s celery task(s)", len(self.tasks))
         for key, task in list(self.tasks.items()):
             try:
                 state = task.state
+
+                if state not in (celery_states.PENDING, celery_states.RETRY):
+                    self.redis_db.srem(self.tasks_pending_key, key)
+
                 if self.last_state[key] != state:
                     if state == celery_states.SUCCESS:
                         self.success(key)

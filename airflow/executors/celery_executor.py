@@ -80,6 +80,9 @@ class CeleryExecutor(BaseExecutor):
         self.namespace_override = "celery_"
         self.tasks_pending_key = f"{self.namespace_override}tasks_pending"
         self.tasks_running_key = f"{self.namespace_override}tasks_running"
+        # Cleanup any left-over old jobs that may have been missed.
+        self.redis_db.delete(self.tasks_pending_key)
+        self.redis_db.delete(self.tasks_running_key)
 
     def execute_async(self, key, command,
                       queue=DEFAULT_CELERY_CONFIG['task_default_queue'],

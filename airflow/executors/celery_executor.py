@@ -79,6 +79,7 @@ class CeleryExecutor(BaseExecutor):
         self.redis_db = redis.Redis(host=os.getenv("REDIS_HOST"), port=os.getenv("REDIS_PORT"))
         self.namespace_override = "celery_"
         self.tasks_pending_key = f"{self.namespace_override}tasks_pending"
+        self.tasks_running_key = f"{self.namespace_override}tasks_running"
 
     def execute_async(self, key, command,
                       queue=DEFAULT_CELERY_CONFIG['task_default_queue'],
@@ -86,6 +87,7 @@ class CeleryExecutor(BaseExecutor):
         self.log.info(f"[celery] queuing {key} through celery, queue={queue}")
         self.tasks[key] = execute_command.apply_async(args=[command], queue=queue)
         self.last_state[key] = celery_states.PENDING
+        # Log all pending jobs in Redis
         key_hash = f"{key[0]}__{key[1]}"
         self.redis_db.sadd(self.tasks_pending_key, key_hash)
 
@@ -94,10 +96,17 @@ class CeleryExecutor(BaseExecutor):
         for key, task in list(self.tasks.items()):
             try:
                 state = task.state
+                key_hash = f"{key[0]}__{key[1]}"
 
+                # Check pending jobs in Redis
                 if state not in (celery_states.PENDING, celery_states.RETRY):
-                    key_hash = f"{key[0]}__{key[1]}"
                     self.redis_db.srem(self.tasks_pending_key, key_hash)
+
+                # Check running jobs in Redis
+                if state in (celery_states.STARTED, celery_states.RECEIVED):
+                    self.redis_db.sadd(self.tasks_running_key, key_hash)
+                else:
+                    self.redis_db.srem(self.tasks_running_key, key_hash)
 
                 if self.last_state[key] != state:
                     if state == celery_states.SUCCESS:

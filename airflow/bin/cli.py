@@ -1251,10 +1251,10 @@ def worker(args):
         log.error("Worker exiting... database connection precheck failed! ")
         sys.exit(1)
 
-    import celery
     from airflow.executors.celery_executor import app as celery_app
+    from celery.bin import worker as cwklass
 
-    celery_worker = celery.bin.worker.worker(app=celery_app)
+    celery_worker = cwklass.worker(app=celery_app)
     options = {
         'optimization': 'fair',
         'O': 'fair',

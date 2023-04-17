@@ -1252,9 +1252,9 @@ def worker(args):
         sys.exit(1)
 
     from airflow.executors.celery_executor import app as celery_app
-    from celery.bin import worker as cwklass
+    from celery.bin.worker import worker as _worker
 
-    celery_worker = cwklass.worker(app=celery_app)
+    celery_worker = _worker(app=celery_app)
     options = {
         'optimization': 'fair',
         'O': 'fair',

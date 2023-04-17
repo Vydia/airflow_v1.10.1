@@ -131,7 +131,6 @@ def setup_locations(process, pid=None, stdout=None, stderr=None, log=None):
     if not pid:
         pid = os.path.join(os.path.expanduser(settings.AIRFLOW_HOME),
                            'airflow-{}.pid'.format(process))
-
     return pid, stdout, stderr, log
 
 
@@ -1028,6 +1027,105 @@ def scheduler(args):
         job.run()
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @cli_utils.action_logging
 def serve_logs(args):
     print("Starting flask")
@@ -1043,11 +1141,8 @@ def serve_logs(args):
             mimetype="application/json",
             as_attachment=False)
 
-    WORKER_LOG_SERVER_PORT = \
-        int(conf.get('celery', 'WORKER_LOG_SERVER_PORT'))
-    flask_app.run(
-        host='0.0.0.0', port=WORKER_LOG_SERVER_PORT)
-
+    WORKER_LOG_SERVER_PORT = int(conf.get('celery', 'WORKER_LOG_SERVER_PORT'))
+    flask_app.run(host='0.0.0.0', port=WORKER_LOG_SERVER_PORT)
 
 
 
@@ -1151,59 +1246,127 @@ def serve_logs(args):
 
 @cli_utils.action_logging
 def worker(args):
-    env = os.environ.copy()
-    env['AIRFLOW_HOME'] = settings.AIRFLOW_HOME
-
     if not settings.validate_session():
         log = LoggingMixin().log
         log.error("Worker exiting... database connection precheck failed! ")
         sys.exit(1)
 
-    # Celery worker
+    import celery
     from airflow.executors.celery_executor import app as celery_app
-    from celery.bin import worker
 
-    worker = worker.worker(app=celery_app)
+    celery_worker = celery.bin.worker.worker(app=celery_app)
     options = {
         'optimization': 'fair',
         'O': 'fair',
         'queues': args.queues,
-        'concurrency': args.concurrency,
-        'hostname': args.celery_hostname,
+        'concurrency': 0, # K8s no need for args.concurrency
+        'hostname': os.environ['POD_NAME'], # args.celery_hostname
         'loglevel': conf.get('core', 'LOGGING_LEVEL'),
     }
+    sp = subprocess.Popen(['airflow', 'serve_logs'], close_fds=True)
+    celery_worker.run(**options)
+    sp.kill()
 
-    if args.daemon:
-        pid, stdout, stderr, log_file = setup_locations("worker",
-                                                        args.pid,
-                                                        args.stdout,
-                                                        args.stderr,
-                                                        args.log_file)
-        handle = setup_logging(log_file)
-        stdout = open(stdout, 'w+')
-        stderr = open(stderr, 'w+')
 
-        ctx = daemon.DaemonContext(
-            pidfile=TimeoutPIDLockFile(pid, -1),
-            files_preserve=[handle],
-            stdout=stdout,
-            stderr=stderr,
-        )
-        with ctx:
-            sp = subprocess.Popen(['airflow', 'serve_logs'], env=env, close_fds=True)
-            worker.run(**options)
-            sp.kill()
 
-        stdout.close()
-        stderr.close()
-    else:
-        # Celery handles termsignal for us.
-        # signal.signal(signal.SIGINT, sigint_handler)
-        # signal.signal(signal.SIGTERM, sigint_handler)
-        sp = subprocess.Popen(['airflow', 'serve_logs'], env=env, close_fds=True)
 
-        worker.run(**options)
-        sp.kill()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def initdb(args):  # noqa
@@ -1530,6 +1693,106 @@ def flower(args):
                              broka, address, port, api, flower_conf, url_prefix])
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @cli_utils.action_logging
 def kerberos(args):  # noqa
     print(settings.HEADER)
@@ -1594,6 +1857,106 @@ def create_user(args):
         print('{} user {} created.'.format(args.role, args.username))
     else:
         raise SystemExit('Failed to create user.')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 Arg = namedtuple(

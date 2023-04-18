@@ -1632,11 +1632,11 @@ class TaskInstance(Base, LoggingMixin):
                 task_copy = copy.copy(task)
                 self.task = task_copy
 
-                def signal_handler(signum, frame):
-                    self.log.error("Received SIGTERM. Terminating subprocesses.")
-                    task_copy.on_kill()
-                    raise AirflowException("Task received SIGTERM signal")
-                signal.signal(signal.SIGTERM, signal_handler)
+                # def signal_handler(signum, frame):
+                #     self.log.error("Received SIGTERM. Terminating subprocesses.")
+                #     task_copy.on_kill()
+                #     raise AirflowException("Task received SIGTERM signal")
+                # signal.signal(signal.SIGTERM, signal_handler)
 
                 # Don't clear Xcom until the task is certain to execute
                 self.clear_xcom_data()

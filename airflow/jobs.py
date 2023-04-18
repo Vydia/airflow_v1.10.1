@@ -164,11 +164,11 @@ class BaseJob(Base, LoggingMixin):
         self.max_tis_per_query = conf.getint('scheduler', 'max_tis_per_query')
         super(BaseJob, self).__init__(*args, **kwargs)
         #
-        self.recieved_kill_signal = False
-        def signal_term_handler(signum, frame):
-            self.log.info(f"Received SIGTERM '{signum}'. Terminating subprocesses")
-            self.recieved_kill_signal = True
-        signal.signal(signal.SIGTERM, signal_term_handler)
+        # self.recieved_kill_signal = False
+        # def signal_term_handler(signum, frame):
+        #     self.log.info(f"Received SIGTERM '{signum}'. Terminating subprocesses")
+        #     self.recieved_kill_signal = True
+        # signal.signal(signal.SIGTERM, signal_term_handler)
 
 
     def is_alive(self):
@@ -529,21 +529,15 @@ class DagFileProcessor(AbstractDagFileProcessor, LoggingMixin):
         self._start_time = timezone.utcnow()
 
     def terminate(self, sigkill=False):
-        """
-        Terminate (and then kill) the process launched to process the file.
-        :param sigkill: whether to issue a SIGKILL if SIGTERM doesn't work.
-        :type sigkill: bool
-        """
         if self._process is None:
             raise AirflowException("Tried to call stop before starting!")
         # The queue will likely get corrupted, so remove the reference
         self._result_queue = None
         self._process.terminate()
-        # Arbitrarily wait 5s for the process to die
         self._process.join(5)
-        if sigkill and self._process.is_alive():
-            self.log.warning("Killing PID %s", self._process.pid)
-            os.kill(self._process.pid, signal.SIGKILL)
+
+        os.kill(self._process.pid, signal.SIGTERM)
+        self.log.warning("Killing PID %s", self._process.pid)
 
     @property
     def pid(self):

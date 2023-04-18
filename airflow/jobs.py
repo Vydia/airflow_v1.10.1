@@ -164,7 +164,7 @@ class BaseJob(Base, LoggingMixin):
         self.max_tis_per_query = conf.getint('scheduler', 'max_tis_per_query')
         super(BaseJob, self).__init__(*args, **kwargs)
         #
-        # self.recieved_kill_signal = False
+        self.recieved_kill_signal = False
         # def signal_term_handler(signum, frame):
         #     self.log.info(f"Received SIGTERM '{signum}'. Terminating subprocesses")
         #     self.recieved_kill_signal = True

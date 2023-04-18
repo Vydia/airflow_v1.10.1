@@ -1259,7 +1259,7 @@ def worker(args):
         'optimization': 'fair',
         'O': 'fair',
         'queues': args.queues,
-        'concurrency': 0, # K8s no need for args.concurrency
+        'concurrency': 1, # K8s no need for args.concurrency
         'hostname': os.environ['POD_NAME'], # args.celery_hostname
         'loglevel': conf.get('core', 'LOGGING_LEVEL'),
     }

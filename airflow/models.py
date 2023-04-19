@@ -3090,7 +3090,7 @@ class DagModel(Base):
     last_scheduler_run = Column(UtcDateTime)
     # Last time this DAG was pickled
     last_pickled = Column(UtcDateTime)
-    # Time when the DAG last received a refresh
+    # Time when the DAG last received a refresh signal
     # (e.g. the DAG's "refresh" button was clicked in the web UI)
     last_expired = Column(UtcDateTime)
     # Whether (one  of) the scheduler is scheduling this DAG at the moment

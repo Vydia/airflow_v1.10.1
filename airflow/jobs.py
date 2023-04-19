@@ -1815,9 +1815,9 @@ class SchedulerJob(BaseJob):
             task_duration_seconds = (loop_start_time - execute_start_time).total_seconds()
             self.log.info(f"{exe_name}: Starting worker loop task_duration_seconds: {task_duration_seconds}")
 
-            if self.recieved_kill_signal:
-                self.log.info(f"{exe_name}: Got kill signal. Exiting worker loop")
-                break
+            # if self.recieved_kill_signal:
+            #     self.log.info(f"{exe_name}: Got kill signal. Exiting worker loop")
+            #     break
 
             if self.run_duration and task_duration_seconds >= self.run_duration:
                 self.log.info(f"{exe_name}: Worked long enough. Exiting worker loop")
@@ -2879,9 +2879,9 @@ class LocalTaskJob(BaseJob):
                                                'scheduler_zombie_task_threshold')
             while True:
 
-                if self.recieved_kill_signal:
-                    self.log.info("Got kill signal. Exiting worker loop")
-                    break
+                # if self.recieved_kill_signal:
+                #     self.log.info("Got kill signal. Exiting worker loop")
+                #     break
 
                 # Monitor the task to see if it's done
                 return_code = self.task_runner.return_code()

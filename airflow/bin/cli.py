@@ -1362,9 +1362,9 @@ def worker(args):
         'hostname': os.environ['POD_NAME'], # args.celery_hostname
         'loglevel': conf.get('core', 'LOGGING_LEVEL'),
     }
-    sp = subprocess.Popen(['airflow', 'serve_logs'], close_fds=True)
+    # sp = subprocess.Popen(['airflow', 'serve_logs'], close_fds=True)
     celery_worker.run(**options)
-    sp.kill()
+    # sp.kill()
 
 
 

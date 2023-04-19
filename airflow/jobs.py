@@ -542,9 +542,13 @@ class DagFileProcessor(AbstractDagFileProcessor, LoggingMixin):
         self._process.terminate()
         # Arbitrarily wait 5s for the process to die
         self._process.join(5)
-        if sigkill and self._process.is_alive():
-            self.log.warning("Killing PID %s", self._process.pid)
-            os.kill(self._process.pid, signal.SIGTERM)
+        #
+        host = os.environ['POD_NAME']
+        self.log.warning(f"{host}: Got terminate for PID {self._process.pid}")
+        #
+        # if sigkill and self._process.is_alive():
+        #     self.log.warning("Killing PID %s", self._process.pid)
+        #     os.kill(self._process.pid, signal.SIGTERM)
 
     @property
     def pid(self):

@@ -1350,21 +1350,19 @@ def worker(args):
         log.error("Worker exiting... database connection precheck failed! ")
         sys.exit(1)
 
+    options = [
+        'worker',
+        '-O', 'fair',
+        '--queues', args.queues,
+        '--concurrency', 1, # K8s no need for args.concurrency
+        '--hostname', os.environ['POD_NAME'], # args.celery_hostname
+        '--loglevel', conf.get('core', 'LOGGING_LEVEL'),
+        '--without-gossip --without-mingle --without-heartbeat', # None of this matters on K8s, mostly a waste of CPU
+    ]
     from airflow.executors.celery_executor import app as celery_app
-    from celery.bin.worker import worker as _worker
 
-    celery_worker = _worker(app=celery_app)
-    options = {
-        'optimization': 'fair',
-        'O': 'fair',
-        'queues': args.queues,
-        'concurrency': 1, # K8s no need for args.concurrency
-        'hostname': os.environ['POD_NAME'], # args.celery_hostname
-        'loglevel': conf.get('core', 'LOGGING_LEVEL'),
-    }
-    # sp = subprocess.Popen(['airflow', 'serve_logs'], close_fds=True)
-    celery_worker.run(**options)
-    # sp.kill()
+    # No need to run in Daemon, because we're on K8s pod.
+    celery_app.worker_main(options)
 
 
 

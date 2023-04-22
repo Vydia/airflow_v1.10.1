@@ -75,6 +75,3 @@ except Exception as e:
                            'SSL and/or have all necessary certs and key ({}).'.format(e))
 
 result_backend = DEFAULT_CELERY_CONFIG['result_backend']
-if 'amqp' in result_backend or 'redis' in result_backend or 'rpc' in result_backend:
-    log.warning("You have configured a result_backend of %s, it is highly recommended "
-                "to use an alternative result_backend (i.e. a database).", result_backend)

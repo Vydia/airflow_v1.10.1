@@ -1354,7 +1354,7 @@ def worker(args):
         'worker',
         '-O', 'fair',
         '-E',
-        '--queues', args.queues,
+        '--queues', 'airflow_celery', # args.queues,
         '--concurrency', 1, # K8s no need for args.concurrency
         '--hostname', os.environ['POD_NAME'], # args.celery_hostname
         '--loglevel', conf.get('core', 'LOGGING_LEVEL'),
@@ -1365,17 +1365,22 @@ def worker(args):
     ]
     from airflow.executors.celery_executor import app as celery_app
 
-    # Example running from command-line (without app)
+    # Example running from command-line
     # """
-    # celery -b $AIRFLOW__CELERY__BROKER_URL \
-    #        --result-backend="$AIRFLOW__CELERY__BROKER_URL" \
-    #        worker                  \
-    #        -E                      \
-    #        -c 1                    \
-    #        -n $POD_NAME            \
-    #        --max-tasks-per-child 1 \
-    #        --without-gossip        \
-    #        --without-mingle        \
+    # exec celery \
+    #        -b $AIRFLOW__CELERY__BROKER_URL                     \
+    #        --result-backend="$AIRFLOW__CELERY__RESULT_BACKEND" \
+    #        -A airflow.executors.celery_executor.app            \
+    #        worker                     \
+    #        -O fair                    \
+    #        -E                         \
+    #        --queues "airflow_celery"  \
+    #        -c 1                       \
+    #        -n $POD_NAME               \
+    #        --loglevel INFO            \
+    #        --max-tasks-per-child 1    \
+    #        --without-gossip           \
+    #        --without-mingle           \
     #        --without-heartbeat
     # """
 

@@ -1353,13 +1353,31 @@ def worker(args):
     options = [
         'worker',
         '-O', 'fair',
+        '-E',
         '--queues', args.queues,
         '--concurrency', 1, # K8s no need for args.concurrency
         '--hostname', os.environ['POD_NAME'], # args.celery_hostname
         '--loglevel', conf.get('core', 'LOGGING_LEVEL'),
-        '--without-gossip --without-mingle --without-heartbeat', # None of this matters on K8s, mostly a waste of CPU
+        '--max-tasks-per-child', 1,
+        '--without-gossip',
+        '--without-mingle',
+        '--without-heartbeat', # None of this matters on K8s, mostly a waste of CPU
     ]
     from airflow.executors.celery_executor import app as celery_app
+
+    # Example running from command-line (without app)
+    # """
+    # celery -b $AIRFLOW__CELERY__BROKER_URL \
+    #        --result-backend="$AIRFLOW__CELERY__BROKER_URL" \
+    #        worker                  \
+    #        -E                      \
+    #        -c 1                    \
+    #        -n $POD_NAME            \
+    #        --max-tasks-per-child 1 \
+    #        --without-gossip        \
+    #        --without-mingle        \
+    #        --without-heartbeat
+    # """
 
     # No need to run in Daemon, because we're on K8s pod.
     celery_app.worker_main(options)

@@ -316,8 +316,10 @@
           .attr('title', this.active_dag_run + '/' + this.max_active_runs + ' active dag runs')
           .tooltip();
           if(this.active_dag_run >= this.max_active_runs) {
-            $('.label.schedule.' + this.dag_id).css('background-color', 'lime');
+            $('.label.schedule.' + this.dag_id).css({'border-radius': '10px', 'color': '#000000cc', 'background-color': 'lime'});
             $('.tr_' + this.dag_id).css('background-color', '#00FF0020');
+          } else {
+            $('.label.schedule.' + this.dag_id).css({'border-radius': '10px', 'color': '#FFFFFFcc', 'background-color': 'gray'});
           }
         });
       });

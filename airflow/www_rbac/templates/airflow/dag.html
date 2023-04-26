@@ -313,6 +313,10 @@ function updateQueryStringParameter(uri, key, value) {
       $("#dagModal").css("margin-top","0px");
     }
 
+    function confirmTriggerDag(dag_id){
+        return confirm("Are you sure you want to run '"+dag_id+"' now?");
+    }
+
     function confirmDeleteDag(dag_id){
         return confirm("Are you sure you want to delete '"+dag_id+"' now?\n\
           This option will delete ALL metadata, DAG runs, etc.\n\

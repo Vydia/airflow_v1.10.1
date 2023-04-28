@@ -543,7 +543,7 @@ class DagFileProcessor(AbstractDagFileProcessor, LoggingMixin):
         # Arbitrarily wait 5s for the process to die
         self._process.join(5)
         #
-        host = os.environ['POD_NAME']
+        host = os.environ.get('POD_NAME', "celery_hostname")
         self.log.warning(f"{host}: Got terminate for PID {self._process.pid}")
         #
         # if sigkill and self._process.is_alive():

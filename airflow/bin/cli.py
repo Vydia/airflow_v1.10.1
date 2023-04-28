@@ -1356,7 +1356,7 @@ def worker(args):
         '-E',
         '--queues', 'airflow_celery', # args.queues,
         '--concurrency', 1, # K8s no need for args.concurrency
-        '--hostname', os.environ['POD_NAME'], # args.celery_hostname
+        '--hostname', os.environ.get('POD_NAME', "celery_hostname"), # args.celery_hostname
         '--loglevel', conf.get('core', 'LOGGING_LEVEL'),
         '--max-tasks-per-child', 1,
         '--without-gossip',

@@ -47,8 +47,9 @@
 {% block tail %}
 {{ super() }}
 <script src="{{ url_for('appbuilder.static',filename='datepicker/bootstrap-datepicker.js') }}"></script>
+<script src="{{ url_for('static', filename='d3.v3.min.js') }}"></script>
 <script src="{{ url_for('static', filename='d3_7.8.4.min.js') }}"></script>
-<script src="{{ url_for('static', filename='d3-v6-tip.min.js') }}"></script>/
+<script src="{{ url_for('static', filename='d3-v6-tip.min.js') }}"></script>
 <script src="{{ url_for('static', filename='gantt-chart-d3v7.js') }}"></script>
 <script>
 

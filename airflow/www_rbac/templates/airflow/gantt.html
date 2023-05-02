@@ -47,23 +47,25 @@
 {% block tail %}
 {{ super() }}
 <script src="{{ url_for('appbuilder.static',filename='datepicker/bootstrap-datepicker.js') }}"></script>
-<script src="{{ url_for('static', filename='d3.v3.min.js') }}"></script>
-<script src="{{ url_for('static', filename='d3.tip.v0.6.3.js') }}"></script>/
-<script src="{{ url_for('static', filename='gantt-chart-d3v2.js') }}"></script>
+<script src="{{ url_for('static', filename='d3_7.8.4.min.js') }}"></script>
+<script src="{{ url_for('static', filename='d3-v6-tip.min.js') }}"></script>/
+<script src="{{ url_for('static', filename='gantt-chart-d3v7.js') }}"></script>
 <script>
+
   $( document ).ready(function() {
     var dag_id = '{{ dag.dag_id }}';
     var task_id = '';
     var exection_date = '';
     data = {{ data |safe }};
-    var gantt = d3.gantt()
-      .taskTypes(data.taskNames)
-      .taskStatus(data.taskStatus)
-      .height(data.height)
-      .selector('.gantt')
-      .tickFormat("%H:%M:%S");
+    var gantt = d3.fancy_gantt()
+        .taskTypes(data.taskNames)
+        .taskStatus(data.taskStatus)
+        .height(data.height)
+        .selector('.gantt')
+        .tickFormat("%H:%M:%S");
     gantt(data.tasks);
   });
+
 </script>
 
 {% endblock %}

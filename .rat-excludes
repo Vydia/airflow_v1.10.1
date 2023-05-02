@@ -48,6 +48,9 @@ dagre-d3.min.js
 bootstrap-toggle.min.js
 bootstrap-toggle.min.css
 d3.v3.min.js
+d3_7.8.4.min.js
+d3-v6-tip.min.js
+gantt-chart-d3v7.js
 ace.js
 node_modules/*
 .*json

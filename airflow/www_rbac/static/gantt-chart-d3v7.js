@@ -1,3 +1,5 @@
+
+const completed_blue = "#00c3ffa6";
 const blueish = "#00c3ff33";
 const pinkish = "#ff00fc33";
 const orangish = "#ffbb0033";
@@ -208,7 +210,15 @@ d3.fancy_gantt = function() {
       .on('click', function(d, i) {
         call_modal(i.taskName, i.executionDate);
       })
-      .attr("fill", "#00c3ffa6")
+      .each(function(d, i) {
+        if(d.status != 'success') {
+          var str = status_colors[d.status];
+          var harder_alpha = str.substring(0, str.length - 2) + "a6"
+          return d3.select(this).style('fill', harder_alpha)
+        }
+        return d3.select(this).style('fill', completed_blue);
+      })
+      // .attr("fill", completed_blue)
       .attr("y", 0)
       .attr("transform", rectTransform)
       .attr("height", function(d) { return y.rangeBand(); })

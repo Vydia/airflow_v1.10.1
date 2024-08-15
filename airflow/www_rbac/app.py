@@ -85,6 +85,9 @@ def create_app(config=None, testing=False, app_name="Airflow"):
                                 "DAG Runs",
                                 category="Browse",
                                 category_icon="fa-globe")
+            appbuilder.add_link("DAG Schedules",
+                                href='/dag_schedules',
+                                category="Browse")
             appbuilder.add_view(views.JobModelView,
                                 "Jobs",
                                 category="Browse")

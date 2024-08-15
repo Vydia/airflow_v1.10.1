@@ -264,6 +264,139 @@ class Airflow(AirflowBaseView):
             auto_complete_data=auto_complete_data,
             view_only=is_view_only(g.user, self.appbuilder))
 
+    @expose('/dag_schedules')
+    # @has_access
+    @provide_session
+    def dag_schedules(self, session=None):
+        DM = models.DagModel
+
+        hide_paused_dags_by_default = conf.getboolean('webserver',
+                                                      'hide_paused_dags_by_default')
+        show_paused_arg = request.args.get('showPaused', 'None')
+
+        def get_int_arg(value, default=0):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+
+        arg_current_page = request.args.get('page', '0')
+        arg_search_query = request.args.get('search', None)
+
+        dags_per_page = PAGE_SIZE
+        current_page = get_int_arg(arg_current_page, default=0)
+
+        if show_paused_arg.strip().lower() == 'false':
+            hide_paused = True
+        elif show_paused_arg.strip().lower() == 'true':
+            hide_paused = False
+        else:
+            hide_paused = hide_paused_dags_by_default
+
+        # read orm_dags from the db
+        sql_query = session.query(DM).filter(
+            ~DM.is_subdag, DM.is_active
+        )
+
+        # optionally filter out "paused" dags
+        if hide_paused:
+            sql_query = sql_query.filter(~DM.is_paused)
+
+        orm_dags = {dag.dag_id: dag for dag
+                    in sql_query
+                    .all()}
+
+        import_errors = session.query(models.ImportError).all()
+        for ie in import_errors:
+            flash(
+                "Broken DAG: [{ie.filename}] {ie.stacktrace}".format(ie=ie),
+                "error")
+
+        # get a list of all non-subdag dags visible to everyone
+        # optionally filter out "paused" dags
+        if hide_paused:
+            unfiltered_webserver_dags = [dag for dag in dagbag.dags.values() if
+                                         not dag.parent_dag and not dag.is_paused]
+
+        else:
+            unfiltered_webserver_dags = [dag for dag in dagbag.dags.values() if
+                                         not dag.parent_dag]
+
+        dags_by_scheduled_runs = []
+
+        for dag in unfiltered_webserver_dags:
+            try:
+                cron_elements = str(dag.schedule_interval).replace("*", "0").split(" ")
+                byminute = cron_elements[0]
+                byhour = cron_elements[1]
+                #
+                # TODO: we need to factor in */3
+                runs_byminute = cron_elements[0].split(",")
+                runs_byhour = cron_elements[1].split(",")
+                total_runs_in_hour = len(runs_byminute)
+                total_runs_in_day  = len(runs_byhour) * total_runs_in_hour
+                #
+                # TODO: factor in none-daily schedules
+                # if cron_elements[2] != "*" # == not a daily run
+                # if cron_elements[3] != "*" # == not every month runs
+                # if cron_elements[4] != "*" # == not every day of week run
+                #
+                for scheduled_to_run_at_minute in runs_byminute:
+                    for scheduled_to_run_at_hour in runs_byhour:
+                        sortable_value = int(scheduled_to_run_at_hour) + (0.01 * int(scheduled_to_run_at_minute))
+                        dags_by_scheduled_runs.append(
+                            [dag.dag_id, sortable_value, f"Hour {scheduled_to_run_at_hour} @ Minute {scheduled_to_run_at_minute}", total_runs_in_day]
+                        )
+            except:
+                dags_by_scheduled_runs.append(
+                    [dag.dag_id, -1.0, f"Error {dag.schedule_interval}", 0]
+                )
+
+        webserver_dags = {
+            dag.dag_id: dag
+            for dag in unfiltered_webserver_dags
+        }
+
+        dags_by_scheduled_runs = sorted(dags_by_scheduled_runs, key=lambda x: x[1], reverse=True)
+
+        webserver_dags_filtered = webserver_dags
+        sorted_dag_ids = sorted(webserver_dags.keys())
+
+        start = current_page * dags_per_page
+        end = start + dags_per_page
+
+        num_of_all_dags = len(sorted_dag_ids)
+        page_dag_ids = sorted_dag_ids[start:end]
+        num_of_pages = int(math.ceil(num_of_all_dags / float(dags_per_page)))
+
+        auto_complete_data = set()
+        for dag in webserver_dags_filtered.values():
+            auto_complete_data.add(dag.dag_id)
+            auto_complete_data.add(dag.owner)
+        for dag in orm_dags.values():
+            auto_complete_data.add(dag.dag_id)
+            auto_complete_data.add(dag.owners)
+
+        return self.render(
+            'airflow/dag_schedules.html',
+            webserver_dags=webserver_dags_filtered,
+            orm_dags=orm_dags,
+            hide_paused=hide_paused,
+            current_page=current_page,
+            search_query=arg_search_query if arg_search_query else '',
+            page_size=dags_per_page,
+            num_of_pages=num_of_pages,
+            num_dag_from=start + 1,
+            num_dag_to=min(end, num_of_all_dags),
+            num_of_all_dags=num_of_all_dags,
+            paging=wwwutils.generate_pages(current_page, num_of_pages,
+                                           search=arg_search_query,
+                                           showPaused=not hide_paused),
+            dag_ids_in_page=page_dag_ids,
+            dags_by_scheduled_runs=dags_by_scheduled_runs,
+            auto_complete_data=auto_complete_data,
+            view_only=is_view_only(g.user, self.appbuilder))
+
     @expose('/dag_stats')
     @has_access
     @provide_session

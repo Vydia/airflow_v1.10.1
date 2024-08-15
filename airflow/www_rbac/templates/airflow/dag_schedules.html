@@ -1,0 +1,343 @@
+{% extends "airflow/master.html" %}
+
+{% block title %}Airflow - DAG Schedules{% endblock %}
+
+{% block head_css %}
+{{ super() }}
+<link href="{{ url_for("static", filename="dataTables.bootstrap.css") }}" rel="stylesheet" type="text/css" >
+<link href="{{ url_for("static", filename="bootstrap-toggle.min.css") }}" rel="stylesheet" type="text/css">
+{% endblock %}
+
+{% block content %}
+  <h2>DAG Schedules</h2>
+
+  <div id="main_content" style="display:none;">
+    <div class="row">
+      <div class="col-sm-2">
+      </div>
+      <div class="col-sm-10">
+      </div>
+    </div>
+    <table id="dags" class="table table-striped table-bordered">
+        <thead>
+            <tr>
+                <th>DAG Schedule</th>
+                <th>Runs Per Day</th>
+                <th>DAG Name</th>
+                <th>Cron</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for dag_item in dags_by_scheduled_runs %}
+            {% set dag_id = dag_item[0] %}
+            {% set dag_sortby_value = dag_item[1] %}
+            {% set dag_schedule_text = dag_item[2] %}
+            {% set dag_runs_a_day = dag_item[3] %}
+            {% set dag = webserver_dags[dag_id] if dag_id in webserver_dags else None %}
+            <tr class="tr_{{ dag_id }}">
+
+                <!-- Column 1: Dag Schedule -->
+                <td>
+                  <a href="{{ url_for('DagRunModelView.list') }}?_flt_3_dag_id={{ dag.dag_id }}">
+                    {{ dag_schedule_text }}
+                  </a>
+                </td>
+
+                <!-- Column 2: Runs Per Day -->
+                <td>
+                  {{ dag_runs_a_day }}
+                </td>
+
+                <!-- Column 3: DAG Name -->
+                <td>
+                  <a href="{{ url_for('Airflow.gantt', dag_id=dag.dag_id) }}" title="{{ dag.description }}">
+                    {{ dag_id }}
+                  </a>
+                </td>
+
+                <!-- Column 4: Dag Schedule Crontab -->
+                <td>
+                  {{ dag.schedule_interval }}
+                </td>
+              </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="row">
+      <div class="col-sm-12" style="text-align:right;">
+        <div class="dataTables_info" id="dags_info" role="status" aria-live="polite" style="padding-top: 0px;">Showing {{num_dag_from}} to {{num_dag_to}} of {{num_of_all_dags}} entries</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-sm-12" style="text-align:left;">
+        <div class="dataTables_info" id="dags_paginate">
+          {{paging}}
+        </div>
+      </div>
+
+    </div>
+    {% if not hide_paused %}
+    <a href="{{ url_for('Airflow.index') }}?showPaused=False">Hide Paused DAG Schedules</a>
+    {% else %}
+    <a href="{{ url_for('Airflow.index') }}?showPaused=True">Show Paused DAG Schedules</a>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block tail %}
+  {{ super() }}
+  <script src="{{ url_for('static', filename='d3.v3.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='jquery.dataTables.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='bootstrap-toggle.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='bootstrap3-typeahead.min.js') }}"></script>
+  <script>
+
+      const DAGS_INDEX = "{{ url_for('Airflow.index') }}"
+      const ENTER_KEY_CODE = 13
+
+      $('#dag_query').on('keypress', function (e) {
+        // check for key press on ENTER (key code 13) to trigger the search
+        if (e.which === ENTER_KEY_CODE) {
+          search_query = $('#dag_query').val();
+          window.location = DAGS_INDEX + "?search="+ encodeURI(search_query);
+          e.preventDefault();
+        }
+      });
+
+      $('#page_size').on('change', function() {
+        p_size = $(this).val();
+        window.location = DAGS_INDEX + "?page_size=" + p_size;
+      });
+
+      function confirmDeleteDag(dag_id){
+          return confirm("Are you sure you want to delete '"+dag_id+"' now?\n\
+          This option will delete ALL metadata, DAG runs, etc.\n\
+          This cannot be undone.");
+      }
+
+      function confirmTriggerDag(dag_id){
+          return confirm("Are you sure you want to run '"+dag_id+"' now?");
+      }
+      all_dags = $("[id^=toggle]");
+      $.each(all_dags, function(i,v) {
+        $(v).change (function() {
+          var dag_id =  $(v).attr('dag_id');
+          if ($(v).prop('checked')) {
+            is_paused = 'true'
+          } else {
+            is_paused = 'false'
+          }
+          url = 'paused?is_paused=' + is_paused + '&dag_id=' + dag_id;
+          $.post(url);
+        });
+      });
+
+      var $input = $(".typeahead");
+      unique_options_search = new Set([
+          {% for token in auto_complete_data %}
+            "{{token}}",
+          {% endfor %}
+        ]);
+
+      $input.typeahead({
+        source: [...unique_options_search],
+        autoSelect: false,
+        afterSelect: function(value) {
+          search_query = value.trim()
+          if (search_query) {
+            window.location = DAGS_INDEX + "?search="+ encodeURI(search_query);
+          }
+        }
+      });
+
+      $input.change(function() {
+        var current = $input.typeahead("getActive");
+
+      });
+
+      $('#dags').dataTable({
+        "iDisplayLength": 500,
+        "bSort": false,
+        "searching": false,
+        "ordering": false,
+        "paging": false,
+        "info": false
+      });
+      $("#main_content").show(250);
+      diameter = 25;
+      circle_margin = 4;
+      stroke_width = 2;
+      stroke_width_hover = 6;
+      d3.json("{{ url_for('Airflow.blocked') }}", function(error, json) {
+        $.each(json, function() {
+          $('.label.schedule.' + this.dag_id)
+          .attr('title', this.active_dag_run + '/' + this.max_active_runs + ' active dag runs')
+          .tooltip();
+          if(this.active_dag_run >= this.max_active_runs) {
+            $('.label.schedule.' + this.dag_id).css({'border-radius': '10px', 'color': '#000000cc', 'background-color': 'lime'});
+            $('.tr_' + this.dag_id).css('background-color', '#00FF0020');
+          } else {
+            $('.label.schedule.' + this.dag_id).css({'border-radius': '10px', 'color': '#FFFFFFcc', 'background-color': 'gray'});
+          }
+        });
+      });
+      d3.json("{{ url_for('Airflow.dag_stats') }}", function(error, json) {
+        for(var dag_id in json) {
+            states = json[dag_id];
+            g = d3.select('svg#dag-run-' + dag_id)
+              .attr('height', diameter + (stroke_width_hover * 2))
+              .attr('width', '110px')
+              .selectAll("g")
+              .data(states)
+              .enter()
+              .append('g')
+              .attr('transform', function(d, i) {
+                x = (i * (diameter + circle_margin)) + (diameter/2 + circle_margin);
+                y = (diameter/2) + stroke_width_hover;
+                return 'translate(' + x + ',' + y + ')';
+              });
+
+            g.append('text')
+              .attr('fill', 'black')
+              .attr('text-anchor', 'middle')
+              .attr('vertical-align', 'middle')
+              .attr('font-size', 8)
+              .attr('y', 3)
+              .text(function(d){ return d.count > 0 ? d.count : ''; });
+
+            g.append('circle')
+              .attr('stroke-width', function(d) {
+                  if (d.count > 0)
+                    return stroke_width;
+                  else {
+                    return 1;
+                  }
+              })
+              .attr('stroke', function(d) {
+                  if (d.count > 0)
+                    return d.color;
+                  else {
+                    return 'gainsboro';
+                  }
+              })
+              .attr('fill-opacity', 0)
+              .attr('r', diameter/2)
+              .attr('title', function(d) {return d.state})
+              .attr('style', function(d) {
+                if (d.count > 0)
+                    return"cursor:pointer;"
+              })
+              .on('click', function(d, i) {
+                  if (d.count > 0)
+                    window.location = "{{ url_for('DagRunModelView.list') }}?_flt_3_dag_id=" + d.dag_id + "&_flt_3_state=" + d.state;
+              })
+              .on('mouseover', function(d, i) {
+                if (d.count > 0) {
+                    d3.select(this).transition().duration(400)
+                      .attr('fill-opacity', 0.3)
+                      .style("stroke-width", stroke_width_hover);
+                }
+              })
+              .on('mouseout', function(d, i) {
+                if (d.count > 0) {
+                    d3.select(this).transition().duration(400)
+                      .attr('fill-opacity', 0)
+                      .style("stroke-width", stroke_width);
+                }
+              })
+              .style("opacity", 0)
+              .transition()
+              .duration(500)
+              .delay(function(d, i){return i*50;})
+              .style("opacity", 1);
+            d3.select("#loading").remove();
+        }
+        $("#pause_header").tooltip();
+        $("#statuses_info").tooltip();
+
+        $("circle").tooltip({
+          html: true,
+          container: "body",
+        });
+      });
+      d3.json("{{ url_for('Airflow.task_stats') }}", function(error, json) {
+        for(var dag_id in json) {
+            states = json[dag_id];
+            g = d3.select('svg#task-run-' + dag_id)
+              .attr('height', diameter + (stroke_width_hover * 2))
+              .attr('width', '270px')
+              .selectAll("g")
+              .data(states)
+              .enter()
+              .append('g')
+              .attr('transform', function(d, i) {
+                x = (i * (diameter + circle_margin)) + (diameter/2 + circle_margin);
+                y = (diameter/2) + stroke_width_hover;
+                return 'translate(' + x + ',' + y + ')';
+              });
+
+            g.append('text')
+              .attr('fill', 'black')
+              .attr('text-anchor', 'middle')
+              .attr('vertical-align', 'middle')
+              .attr('font-size', 8)
+              .attr('y', 3)
+              .text(function(d){ return d.count > 0 ? d.count : ''; });
+
+            g.append('circle')
+              .attr('stroke-width', function(d) {
+                  if (d.count > 0)
+                    return stroke_width;
+                  else {
+                    return 1;
+                  }
+              })
+              .attr('stroke', function(d) {
+                  if (d.count > 0)
+                    return d.color;
+                  else {
+                    return 'gainsboro';
+                  }
+              })
+              .attr('fill-opacity', 0)
+              .attr('r', diameter/2)
+              .attr('title', function(d) {return d.state})
+              .attr('style', function(d) {
+                if (d.count > 0)
+                    return"cursor:pointer;"
+              })
+              .on('click', function(d, i) {
+                  if (d.count > 0)
+                    window.location = "{{ url_for('TaskInstanceModelView.list') }}?_flt_3_dag_id=" + d.dag_id + "&_flt_3_state=" + d.state;
+              })
+              .on('mouseover', function(d, i) {
+                if (d.count > 0) {
+                    d3.select(this).transition().duration(400)
+                      .attr('fill-opacity', 0.3)
+                      .style("stroke-width", stroke_width_hover);
+                }
+              })
+              .on('mouseout', function(d, i) {
+                if (d.count > 0) {
+                    d3.select(this).transition().duration(400)
+                      .attr('fill-opacity', 0)
+                      .style("stroke-width", stroke_width);
+                }
+              })
+              .style("opacity", 0)
+              .transition()
+              .duration(500)
+              .delay(function(d, i){return i*50;})
+              .style("opacity", 1);
+            d3.select("#loading").remove();
+        }
+        $("#pause_header").tooltip();
+        $("#statuses_info").tooltip();
+
+        $("circle").tooltip({
+          html: true,
+          container: "body",
+        });
+      });
+  </script>
+{% endblock %}

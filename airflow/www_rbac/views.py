@@ -630,7 +630,6 @@ class Airflow(AirflowBaseView):
             return jsonify(message=["*** Task instance did not exist in the DB\n"], metadata=log_metadata)
 
         def download_file_from_s3(s3_filepath, local_filepath, bucket):
-            print(f"S3 downloading : {bucket}:/{s3_filepath}  =>  {local_filepath}")
             session = boto3.Session(aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"], aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
             s3_client = session.resource("s3")
             with open(local_filepath, "wb") as file:
@@ -651,7 +650,6 @@ class Airflow(AirflowBaseView):
 
         except AttributeError as e:
             error_message = ["Task log handler does not support read logs.\n{}\n".format(str(e))]
-            # error_message = ["Task log handler {} does not support read logs.\n{}\n".format(task_log_reader, str(e))]
             return jsonify(message=error_message, error=True, metadata=log_metadata)
 
     @expose('/log')
@@ -695,7 +693,6 @@ class Airflow(AirflowBaseView):
             page_iterator = paginator.paginate(**operation_parameters)
             page_count = 0
             for page in page_iterator:
-                print(f"> getting S3 page: {page_count}")
                 if "Contents" not in page:
                     break
                 page_count += 1

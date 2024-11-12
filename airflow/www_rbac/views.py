@@ -32,6 +32,7 @@ import traceback
 import markdown
 import nvd3
 import pendulum
+import boto3
 
 import sqlalchemy as sqla
 from sqlalchemy import or_, desc, and_, union_all
@@ -603,13 +604,9 @@ class Airflow(AirflowBaseView):
         task_id = request.args.get('task_id')
         execution_date = request.args.get('execution_date')
         dttm = pendulum.parse(execution_date)
-        try_number = int(request.args.get('try_number'))
-        metadata = request.args.get('metadata')
-        metadata = json.loads(metadata)
-
-        # metadata may be null
-        if not metadata:
-            metadata = {}
+        log_metadata = request.args.get('metadata')
+        log_metadata = json.loads(log_metadata) or dict()
+        log_metadata['end_of_log'] = True
 
         # Convert string datetime into actual datetime
         try:
@@ -624,34 +621,38 @@ class Airflow(AirflowBaseView):
 
             return response
 
-        logger = logging.getLogger('airflow.task')
-        task_log_reader = conf.get('core', 'task_log_reader')
-        handler = next((handler for handler in logger.handlers
-                        if handler.name == task_log_reader), None)
-
         ti = session.query(models.TaskInstance).filter(
             models.TaskInstance.dag_id == dag_id,
             models.TaskInstance.task_id == task_id,
             models.TaskInstance.execution_date == dttm).first()
+
+        if ti is None:
+            return jsonify(message=["*** Task instance did not exist in the DB\n"], metadata=log_metadata)
+
+        def download_file_from_s3(s3_filepath, local_filepath, bucket):
+            print(f"S3 downloading : {bucket}:/{s3_filepath}  =>  {local_filepath}")
+            session = boto3.Session(aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"], aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
+            s3_client = session.resource("s3")
+            with open(local_filepath, "wb") as file:
+                return s3_client.Object(bucket, s3_filepath).download_fileobj(file)
+
+        log_s3_bucket = request.args.get('log_s3_bucket')
+        log_s3_filepath = request.args.get('log_s3_filepath')
+        local_filepath = log_s3_filepath.replace("/", "_").replace("00", "").replace("+", "").replace(":", "").replace("-", "")
+        local_filepath = f"/tmp/{local_filepath}"
+
         try:
-            if ti is None:
-                logs = ["*** Task instance did not exist in the DB\n"]
-                metadata['end_of_log'] = True
-            else:
-                dag = dagbag.get_dag(dag_id)
-                ti.task = dag.get_task(ti.task_id)
-                logs, metadatas = handler.read(ti, try_number, metadata=metadata)
-                metadata = metadatas[0]
-            for i, log in enumerate(logs):
-                if PY2 and not isinstance(log, unicode):
-                    logs[i] = log.decode('utf-8')
-            message = logs[0]
-            return jsonify(message=message, metadata=metadata)
+            download_file_from_s3(log_s3_filepath, local_filepath, log_s3_bucket)
+
+            with open(local_filepath, "r") as log_file:
+                message = log_file.read()
+
+            return jsonify(message=[message], metadata=log_metadata)
+
         except AttributeError as e:
-            error_message = ["Task log handler {} does not support read logs.\n{}\n"
-                             .format(task_log_reader, str(e))]
-            metadata['end_of_log'] = True
-            return jsonify(message=error_message, error=True, metadata=metadata)
+            error_message = ["Task log handler does not support read logs.\n{}\n".format(str(e))]
+            # error_message = ["Task log handler {} does not support read logs.\n{}\n".format(task_log_reader, str(e))]
+            return jsonify(message=error_message, error=True, metadata=log_metadata)
 
     @expose('/log')
     @has_access
@@ -670,12 +671,65 @@ class Airflow(AirflowBaseView):
             models.TaskInstance.task_id == task_id,
             models.TaskInstance.execution_date == dttm).first()
 
-        logs = [''] * (ti.next_try_number - 1 if ti is not None else 0)
+        def paginated_list(s3_prefix, bucket, region_name):
+            import boto3
+            s3_prefix = s3_prefix.strip("/")
+            class ClientWrapper:
+                def __init__(self, auto_delete=True, **kwargs):
+                    self.auto_delete = auto_delete
+                    if "auto_delete" in kwargs:
+                        del kwargs["auto_delete"]
+                    kwargs["aws_access_key_id"] = kwargs.get("aws_access_key_id") or os.environ["AWS_ACCESS_KEY_ID"]
+                    kwargs["aws_secret_access_key"] = kwargs.get("aws_secret_access_key") or os.environ["AWS_SECRET_ACCESS_KEY"]
+                    kwargs["region_name"] = kwargs.get("region_name") or os.environ["AWS_REGION"]
+                    self.client = boto3.client(**kwargs)
+                def __del__(self):
+                    if self.auto_delete:
+                        http = self.client._endpoint.http_session
+                        http._manager.clear()
+                        for manager in http._proxy_managers.values():
+                            manager.clear()
+            s3w = ClientWrapper(service_name="s3", region_name=region_name)
+            paginator = s3w.client.get_paginator("list_objects")
+            operation_parameters = {"Bucket": bucket, "Prefix": s3_prefix}
+            page_iterator = paginator.paginate(**operation_parameters)
+            page_count = 0
+            for page in page_iterator:
+                print(f"> getting S3 page: {page_count}")
+                if "Contents" not in page:
+                    break
+                page_count += 1
+                for key in page["Contents"]:
+                    yield key
+
+        base_s3_path = os.environ.get('AIRFLOW__CORE__AIRFLOW_LOGS_PATH').strip("/")
+        s3_dirs = base_s3_path.replace("s3://", "").split("/")
+        bucket = s3_dirs[0]
+        s3_prefix = "/".join(s3_dirs[1:]).strip("/")
+        s3_prefix = f"{s3_prefix}/{dag_id}/{task_id}/{dttm}/"
+        region_name = os.environ["AWS_REGION"]
+
+        logs = [ s3_file["Key"] for s3_file in paginated_list(s3_prefix, bucket, region_name) ]
+        log_names = [ item.split("/")[-1].replace(".log", "") for item in logs ]
+        log_paths_str = '"' + '","'.join(logs) + '"'
+        log_names_str = '"' + '","'.join(log_names) + '"'
+
         return self.render(
             'airflow/ti_log.html',
-            logs=logs, dag=dag, title="Log by attempts",
-            dag_id=dag.dag_id, task_id=task_id,
-            execution_date=execution_date, form=form)
+            #
+            logs=logs,
+            log_s3_names=log_names,
+            log_s3_bucket=bucket,
+            log_s3_names_str=log_names_str,
+            log_s3_paths_str=log_paths_str,
+            #
+            dag=dag,
+            title="Log by attempts",
+            dag_id=dag.dag_id,
+            task_id=task_id,
+            execution_date=execution_date,
+            form=form
+        )
 
     @expose('/task')
     @has_access

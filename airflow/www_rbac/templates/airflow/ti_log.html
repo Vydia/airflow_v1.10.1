@@ -22,20 +22,20 @@ limitations under the License.
 {{ super() }}
 <h4>{{ title }}</h4>
 <ul class="nav nav-pills" role="tablist">
-  {% for log in logs %}
+  {% for log in log_s3_names %}
   <li role="presentation" class="{{ 'active' if loop.last else '' }}">
-    <a href="#{{ loop.index }}" aria-controls="{{ loop.index }}" role="tab" data-toggle="tab">
-      {{ loop.index }}
+    <a href="#{{ log }}" aria-controls="{{ log }}" role="tab" data-toggle="tab">
+      {{ log }}
     </a>
   </li>
   {% endfor %}
 </ul>
 <div class="tab-content">
-  {% for log in logs %}
-  <div role="tabpanel" class="tab-pane {{ 'active' if loop.last else '' }}" id="{{ loop.index }}">
-    <img id="loading-{{ loop.index }}" style="margin-top:0%; margin-left:50%; height:50px; width:50px; position: absolute;"
+  {% for log in log_s3_names %}
+  <div role="tabpanel" class="tab-pane {{ 'active' if loop.last else '' }}" id="{{ log }}">
+    <img id="loading-{{ log }}" style="margin-top:0%; margin-left:50%; height:50px; width:50px; position: absolute;"
          alt="spinner" src="{{ url_for('static', filename='loading.gif') }}">
-    <pre><code id="try-{{ loop.index }}">{{ log }}</code></pre>
+    <pre><code id="try-{{ log }}">{{ log }}</code></pre>
   </div>
   {% endfor %}
   </div>
@@ -49,9 +49,7 @@ limitations under the License.
     // Distance away from page bottom to enable auto tailing.
     const AUTO_TAILING_OFFSET = 30;
     // Animation speed for auto tailing log display.
-    const ANIMATION_SPEED = 1000;
-    // Total number of tabs to show.
-    const TOTAL_ATTEMPTS = "{{ logs|length }}";
+    const ANIMATION_SPEED = 2000;
 
     // Recursively fetch logs from flask endpoint.
     function recurse(delay=DELAY) {
@@ -71,9 +69,9 @@ limitations under the License.
     }
 
     // Streaming log with auto-tailing.
-    function autoTailingLog(try_number, metadata=null, auto_tailing=false) {
+    function autoTailingLog(log_filepath, log_name, try_number, metadata=null, auto_tailing=false) {
       console.debug("Auto-tailing log for dag_id: {{ dag_id }}, task_id: {{ task_id }}, \
-       execution_date: {{ execution_date }}, try_number: " + try_number + ", metadata: " + JSON.stringify(metadata));
+       execution_date: {{ execution_date }}, log_filepath: " + log_filepath + ", metadata: " + JSON.stringify(metadata));
 
       return Promise.resolve(
         $.ajax({
@@ -82,13 +80,16 @@ limitations under the License.
             dag_id: "{{ dag_id }}",
             task_id: "{{ task_id }}",
             execution_date: "{{ execution_date }}",
+            log_s3_filepath: log_filepath,
+            log_s3_bucket: "{{ log_s3_bucket }}",
             try_number: try_number,
+            log_s3_name: log_name,
             metadata: JSON.stringify(metadata),
           },
         })).then(res => {
           // Stop recursive call to backend when error occurs.
           if (!res) {
-            document.getElementById("loading-"+try_number).style.display = "none";
+            document.getElementById("loading-"+log_name).style.display = "none";
             return;
           }
           // res.error is a boolean
@@ -97,7 +98,7 @@ limitations under the License.
             if (res.message) {
               console.error("Error while retrieving log: " + res.message);
             }
-            document.getElementById("loading-"+try_number).style.display = "none";
+            document.getElementById("loading-"+log_name).style.display = "none";
             return;
           }
 
@@ -107,7 +108,7 @@ limitations under the License.
               var should_scroll = true
             }
             // The message may contain HTML, so either have to escape it or write it as text.
-            document.getElementById(`try-${try_number}`).textContent += res.message + "\n";
+            document.getElementById(`try-${log_name}`).textContent += res.message + "\n";
             // Auto scroll window to the end if current window location is near the end.
             if(should_scroll) {
               $("html, body").animate({ scrollTop: $(document).height() }, ANIMATION_SPEED);
@@ -115,25 +116,16 @@ limitations under the License.
           }
 
           if (res.metadata.end_of_log) {
-            document.getElementById("loading-"+try_number).style.display = "none";
+            document.getElementById("loading-"+log_name).style.display = "none";
             return;
           }
-          return recurse().then(() => autoTailingLog(
-            try_number, res.metadata, auto_tailing));
+
         });
     }
     $(document).ready(function() {
-      // Lazily load all past task instance logs.
-      // TODO: We only need to have recursive queries for
-      // latest running task instances. Currently it does not
-      // work well with ElasticSearch because ES query only
-      // returns at most 10k documents. We want the ability
-      // to display all logs in the front-end.
-      // An optimization here is to render from latest attempt.
-      for(let i = TOTAL_ATTEMPTS; i >= 1; i--) {
-        // Only auto_tailing the page when streaming the latest attempt.
-        autoTailingLog(i, null, auto_tailing=(i == TOTAL_ATTEMPTS));
-      }
+      {% for log in logs %}
+        autoTailingLog("{{ log }}", "{{ log_s3_names[loop.index - 1] }}", "{{ loop.index - 1 }}", null, false);
+      {% endfor %}
     });
 
 </script>

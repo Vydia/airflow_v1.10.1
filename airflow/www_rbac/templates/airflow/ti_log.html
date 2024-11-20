@@ -17,28 +17,48 @@ limitations under the License.
 #}
 {% extends "airflow/task_instance.html" %}
 {% block title %}Airflow - DAGs{% endblock %}
-
 {% block content %}
 {{ super() }}
-<h4>{{ title }}</h4>
 <ul class="nav nav-pills" role="tablist">
-  {% for log in log_s3_names %}
-  <li role="presentation" class="{{ 'active' if loop.last else '' }}">
+  <h4>{{ title_group_1 }}</h4>
+  {% for log in group_1_log_s3_names %}
+  <li role="presentation" class="{{ 'active' if loop.first else '' }}" style="background: #0091a13d; border-radius: 4px;">
     <a href="#{{ log }}" aria-controls="{{ log }}" role="tab" data-toggle="tab">
       {{ log }}
     </a>
   </li>
   {% endfor %}
+  {% if not group_1_log_s3_names %}
+  <li role="presentation" class="" style="background: #0091a13d; border-radius: 4px;">
+    &lpar;No logs found in S3&rpar;
+  </li>
+  {% endif %}
+  <br>
+  <br>
+  <h4>{{ title_group_2 }}</h4>
+  {% for log in group_2_log_s3_names %}
+  <li role="presentation" class="" style="background: #0091a13d; border-radius: 4px;">
+    <a href="#{{ log }}" aria-controls="{{ log }}" role="tab" data-toggle="tab">
+      {{ log }}
+    </a>
+  </li>
+  {% endfor %}
+  {% if not group_2_log_s3_names %}
+  <li role="presentation" class="" style="background: #0091a13d; border-radius: 4px;">
+    &lpar;No logs found in S3&rpar;
+  </li>
+  {% endif %}
 </ul>
+<br>
 <div class="tab-content">
-  {% for log in log_s3_names %}
-  <div role="tabpanel" class="tab-pane {{ 'active' if loop.last else '' }}" id="{{ log }}">
+  {% for log in all_log_s3_names %}
+  <div role="tabpanel" class="tab-pane {{ 'active' if loop.first else '' }}" id="{{ log }}">
     <img id="loading-{{ log }}" style="margin-top:0%; margin-left:50%; height:50px; width:50px; position: absolute;"
          alt="spinner" src="{{ url_for('static', filename='loading.gif') }}">
     <pre><code id="try-{{ log }}">{{ log }}</code></pre>
   </div>
   {% endfor %}
-  </div>
+</div>
 {% endblock %}
 {% block tail %}
 {{ super() }}
@@ -124,7 +144,7 @@ limitations under the License.
     }
     $(document).ready(function() {
       {% for log in logs %}
-        autoTailingLog("{{ log }}", "{{ log_s3_names[loop.index - 1] }}", "{{ loop.index - 1 }}", null, false);
+        autoTailingLog("{{ log }}", "{{ all_log_s3_names[loop.index - 1] }}", "{{ loop.index - 1 }}", null, false);
       {% endfor %}
     });
 

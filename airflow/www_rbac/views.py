@@ -707,21 +707,34 @@ class Airflow(AirflowBaseView):
         region_name = os.environ["AWS_REGION"]
 
         logs = [ s3_file["Key"] for s3_file in paginated_list(s3_prefix, bucket, region_name) ]
-        log_names = [ item.split("/")[-1].replace(".log", "") for item in logs ]
-        log_paths_str = '"' + '","'.join(logs) + '"'
-        log_names_str = '"' + '","'.join(log_names) + '"'
+        all_log_s3_names = [ item.split("/")[-1].replace(".log", "") for item in logs ]
+        # log_paths_str = '"' + '","'.join(logs) + '"'
+        log_s3_names_str = '"' + '","'.join(all_log_s3_names) + '"'
+
+        group_1_log_s3_names = []
+        group_2_log_s3_names = []
+
+        for log_name in all_log_s3_names:
+            if len(log_name) <= 3:
+                group_1_log_s3_names.append(log_name)
+            else:
+                group_2_log_s3_names.append(log_name)
 
         return self.render(
             'airflow/ti_log.html',
             #
             logs=logs,
-            log_s3_names=log_names,
+            all_log_s3_names=all_log_s3_names,
+            group_1_log_s3_names=group_1_log_s3_names,
+            group_2_log_s3_names=group_2_log_s3_names,
             log_s3_bucket=bucket,
-            log_s3_names_str=log_names_str,
-            log_s3_paths_str=log_paths_str,
+            log_s3_names_str=log_s3_names_str,
+            # log_s3_paths_str=log_paths_str,
             #
             dag=dag,
-            title="Log by attempts",
+            title="",
+            title_group_1=os.getenv("AIRFLOW__WEBSERVER__LOG_GROUP_1_TITLE") or "Airflow Logs",
+            title_group_2=os.getenv("AIRFLOW__WEBSERVER__LOG_GROUP_2_TITLE") or "Group 2 Logs",
             dag_id=dag.dag_id,
             task_id=task_id,
             execution_date=execution_date,

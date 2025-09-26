@@ -2414,6 +2414,7 @@ class BaseOperator(LoggingMixin):
 
         validate_key(task_id)
         self.task_id = task_id
+        os.environ["AIRFLOW__TASK_ID"] = self.task_id
         self.owner = owner
         self.email = email
         self.email_on_retry = email_on_retry
@@ -2489,6 +2490,7 @@ class BaseOperator(LoggingMixin):
             dag = _CONTEXT_MANAGER_DAG
         if dag:
             self.dag = dag
+            os.environ["AIRFLOW__DAG_ID"] = dag.dag_id
 
         self._log = logging.getLogger("airflow.task.operators")
 

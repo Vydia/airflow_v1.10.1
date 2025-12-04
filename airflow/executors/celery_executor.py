@@ -56,10 +56,9 @@ def execute_command(command):
     try:
         subprocess.check_call(command, shell=True, stderr=subprocess.STDOUT, close_fds=True, env=env)
     except (subprocess.CalledProcessError, ProcessLookupError) as e:
-        log.exception('execute_command encountered a CalledProcessError')
+        log.exception(f"execute_command encountered {e}")
         log.error(e)
-
-        raise AirflowException('Celery command failed')
+        # raise AirflowException('Celery command failed')
 
 
 class CeleryExecutor(BaseExecutor):

@@ -230,7 +230,8 @@ def reap_process_group(pid, log, sig=signal.SIGTERM,
         log.info("Process %s (%s) terminated with exit code %s", p, p.pid, p.returncode)
 
     if pid == os.getpid():
-        raise RuntimeError("I refuse to kill myself")
+        log.error("I refuse to kill myself")
+        return
 
     parent = psutil.Process(pid)
 
@@ -238,20 +239,27 @@ def reap_process_group(pid, log, sig=signal.SIGTERM,
     children.append(parent)
 
     log.info("Sending %s to GPID %s", sig, os.getpgid(pid))
-    os.killpg(os.getpgid(pid), sig)
-
-    gone, alive = psutil.wait_procs(children, timeout=timeout, callback=on_terminate)
-
-    if alive:
-        for p in alive:
-            log.warn("process %s (%s) did not respond to SIGTERM. Trying SIGKILL", p, pid)
-
-        os.killpg(os.getpgid(pid), signal.SIGKILL)
-
-        gone, alive = psutil.wait_procs(alive, timeout=timeout, callback=on_terminate)
+    try:
+        os.killpg(os.getpgid(pid), sig)
+    
+        gone, alive = psutil.wait_procs(children, timeout=timeout, callback=on_terminate)
+    
         if alive:
             for p in alive:
-                log.error("Process %s (%s) could not be killed. Giving up.", p, p.pid)
+                log.warn("process %s (%s) did not respond to SIGTERM. Trying SIGKILL", p, pid)
+    
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+    
+            gone, alive = psutil.wait_procs(alive, timeout=timeout, callback=on_terminate)
+            if alive:
+                for p in alive:
+                    log.error("Process %s (%s) could not be killed. Giving up.", p, p.pid)
+
+    except Exception as error:
+        log.error(error)
+        from traceback import print_exc
+        print_exc()
+        log.error("Process pid (%s) could not be killed. Giving up.", pid)
 
 
 def parse_template_string(template_string):

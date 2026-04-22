@@ -902,7 +902,7 @@ class Airflow(AirflowBaseView):
             flash("Could not queue task instance for execution, dependencies not met: "
                   "{}".format(failed_deps_str),
                   "error")
-            # return redirect(origin)
+            return redirect(origin)
 
         executor.start()
         executor.queue_task_instance(

@@ -893,14 +893,16 @@ class Airflow(AirflowBaseView):
             ignore_all_deps=ignore_all_deps,
             ignore_task_deps=ignore_task_deps,
             ignore_ti_state=ignore_ti_state)
+
         failed_deps = list(ti.get_failed_dep_statuses(dep_context=dep_context))
+
         if failed_deps:
             failed_deps_str = ", ".join(
                 ["{}: {}".format(dep.dep_name, dep.reason) for dep in failed_deps])
             flash("Could not queue task instance for execution, dependencies not met: "
                   "{}".format(failed_deps_str),
                   "error")
-            return redirect(origin)
+            # return redirect(origin)
 
         executor.start()
         executor.queue_task_instance(

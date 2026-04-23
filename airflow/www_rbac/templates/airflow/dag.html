@@ -156,9 +156,15 @@
             Run
           </button>
           <span class="btn-group">
-            <input id="chb_ignore_all_deps" type="checkbox" data-toggle="toggle" data-size="mini" method="post" title="Ignores all non-critical dependencies, including task state and task_deps">Ignore All Deps</input>
-            <input id="chb_ignore_ti_state" type="checkbox" data-toggle="toggle" data-size="mini" method="post" title="Ignore previous success/failure">Ignore Task State</input>
-            <input id="chb_ignore_task_deps" type="checkbox" data-toggle="toggle" data-size="mini" method="post" title="Disregard the task-specific dependencies, e.g. status of upstream task instances and depends_on_past">Ignore Task Deps</input>
+            <div>
+              <input id="chb_ignore_all_deps" type="checkbox" data-toggle="toggle" data-size="mini" method="post" title="Ignores all non-critical dependencies, including task state and task_deps">Ignore All Deps</input>
+            </div>
+            <div>
+              <input id="chb_ignore_ti_state" type="checkbox" data-toggle="toggle" data-size="mini" method="post" title="Ignore previous success/failure">Ignore Task State</input>
+            </div>
+            <div>
+              <input id="chb_ignore_task_deps" type="checkbox" data-toggle="toggle" data-size="mini" method="post" title="Disregard the task-specific dependencies, e.g. status of upstream task instances and depends_on_past">Ignore Task Deps</input>
+            </div>
           </span>
           <hr/>
           <button id="btn_clear" type="button" class="btn btn-primary"
